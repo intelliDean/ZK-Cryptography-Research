@@ -1,0 +1,15 @@
+[package]
+name = "sumcheck_protocol"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+ark-ff = "0.5.0"
+ark-bn254 = "0.5.0"
+ark-std = "0.5.0"
+rand = "0.9.0-beta.3"
+sha3 = "0.11.0-pre.4"
+bytemuck = "1.21.0"
+
+
+polynomials = { path = "../polynomials" }

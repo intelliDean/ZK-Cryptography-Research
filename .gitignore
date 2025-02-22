@@ -1,0 +1,46 @@
+
+# Cargo build artifacts
+# all targets
+/target
+**/target
+
+# all locks
+**/Cargo.lock
+# all .ideas
+
+**/.idea
+
+
+# Generated files
+**/*.rs.bk
+**/*.rlib
+
+# Editor or OS specific files
+*.swp
+*.swo
+.DS_Store
+
+# Logs
+*.log
+
+# Environment files
+.env
+
+# If you want to exclude a folder (e.g., a folder named "secrets" or "docs")
+/secrets/
+/docs/private/
+
+# If you have build scripts, intermediate files, or temporary files:
+*.tmp
+*.cache
+
+
+
+
+
+
+
+
+
+
+

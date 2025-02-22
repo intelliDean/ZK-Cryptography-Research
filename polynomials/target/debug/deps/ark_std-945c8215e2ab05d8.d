@@ -1,0 +1,11 @@
+/home/dean/CairoProjects/ZK_Research_Implementations/polynomials/target/debug/deps/libark_std-945c8215e2ab05d8.rmeta: /home/dean/.cargo/registry/src/index.crates.io-6f17d22bba15001f/ark-std-0.5.0/src/lib.rs /home/dean/.cargo/registry/src/index.crates.io-6f17d22bba15001f/ark-std-0.5.0/src/rand_helper.rs /home/dean/.cargo/registry/src/index.crates.io-6f17d22bba15001f/ark-std-0.5.0/src/perf_trace.rs /home/dean/.cargo/registry/src/index.crates.io-6f17d22bba15001f/ark-std-0.5.0/src/iterable/mod.rs /home/dean/.cargo/registry/src/index.crates.io-6f17d22bba15001f/ark-std-0.5.0/src/iterable/rev.rs
+
+/home/dean/CairoProjects/ZK_Research_Implementations/polynomials/target/debug/deps/libark_std-945c8215e2ab05d8.rlib: /home/dean/.cargo/registry/src/index.crates.io-6f17d22bba15001f/ark-std-0.5.0/src/lib.rs /home/dean/.cargo/registry/src/index.crates.io-6f17d22bba15001f/ark-std-0.5.0/src/rand_helper.rs /home/dean/.cargo/registry/src/index.crates.io-6f17d22bba15001f/ark-std-0.5.0/src/perf_trace.rs /home/dean/.cargo/registry/src/index.crates.io-6f17d22bba15001f/ark-std-0.5.0/src/iterable/mod.rs /home/dean/.cargo/registry/src/index.crates.io-6f17d22bba15001f/ark-std-0.5.0/src/iterable/rev.rs
+
+/home/dean/CairoProjects/ZK_Research_Implementations/polynomials/target/debug/deps/ark_std-945c8215e2ab05d8.d: /home/dean/.cargo/registry/src/index.crates.io-6f17d22bba15001f/ark-std-0.5.0/src/lib.rs /home/dean/.cargo/registry/src/index.crates.io-6f17d22bba15001f/ark-std-0.5.0/src/rand_helper.rs /home/dean/.cargo/registry/src/index.crates.io-6f17d22bba15001f/ark-std-0.5.0/src/perf_trace.rs /home/dean/.cargo/registry/src/index.crates.io-6f17d22bba15001f/ark-std-0.5.0/src/iterable/mod.rs /home/dean/.cargo/registry/src/index.crates.io-6f17d22bba15001f/ark-std-0.5.0/src/iterable/rev.rs
+
+/home/dean/.cargo/registry/src/index.crates.io-6f17d22bba15001f/ark-std-0.5.0/src/lib.rs:
+/home/dean/.cargo/registry/src/index.crates.io-6f17d22bba15001f/ark-std-0.5.0/src/rand_helper.rs:
+/home/dean/.cargo/registry/src/index.crates.io-6f17d22bba15001f/ark-std-0.5.0/src/perf_trace.rs:
+/home/dean/.cargo/registry/src/index.crates.io-6f17d22bba15001f/ark-std-0.5.0/src/iterable/mod.rs:
+/home/dean/.cargo/registry/src/index.crates.io-6f17d22bba15001f/ark-std-0.5.0/src/iterable/rev.rs:
