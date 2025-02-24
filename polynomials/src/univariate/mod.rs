@@ -1,4 +1,3 @@
-pub mod point;
-pub mod polynomial_division;
-pub mod univariate_polynomial;
-pub mod utilities;
+pub mod poly_div_f64;
+pub mod uni_poly;
+pub mod uni_point;

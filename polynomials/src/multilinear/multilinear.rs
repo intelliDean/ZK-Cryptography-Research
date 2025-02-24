@@ -1,4 +1,4 @@
-use ark_ff::PrimeField;
+use ark_ff::{BigInteger, PrimeField};
 use num_traits::{NumCast, ToPrimitive};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -9,6 +9,7 @@ pub struct MultilinearPoly<F: PrimeField> {
 pub trait Multilinear<F: PrimeField> {
     fn new(polynomial: Vec<F>) -> Self;
     fn partial_evaluation(self, var_pos: u32, eval_var_at: F) -> MultilinearPoly<F>;
+    fn convert_to_bytes(&self) -> Vec<u8>;
     fn sum_polynomial(self, other: MultilinearPoly<F>) -> MultilinearPoly<F>;
     fn multiply_polynomial(self, other: MultilinearPoly<F>) -> MultilinearPoly<F>;
     fn element_sum(self, other: MultilinearPoly<F>) -> MultilinearPoly<F>;
@@ -29,6 +30,7 @@ pub trait Multilinear<F: PrimeField> {
         let low = value & ((1 << index) - 1);
         (high << (index + 1)) | low
     }
+
     fn partial_evaluation2(self, var_pos: u32, eval_var_at: F) -> MultilinearPoly<F>;
     fn full_evaluation(self, eval_at: Vec<F>) -> F;
 }
@@ -70,6 +72,36 @@ impl<F: PrimeField> Multilinear<F> for MultilinearPoly<F> {
         MultilinearPoly::new(new_polynomial)
     }
 
+    // fn convert_to_bytes(&self) -> Vec<u8>  {
+    //     let mut bytes = Vec::new();
+    //     let byte_len = F::BigInt::NUM_LIMBS * 8; // Each limb is 8 bytes
+    //
+    //     for element in self.polynomial.to_vec() {
+    //         let element_bytes = element.into_bigint().to_bytes_be();
+    //         // Pad the bytes to ensure consistent length
+    //         bytes.extend_from_slice(&element_bytes);
+    //         if element_bytes.len() < byte_len {
+    //             bytes.extend(vec![0; byte_len - element_bytes.len()]);
+    //         }
+    //     }
+    //     bytes
+    // }
+    fn convert_to_bytes(&self) -> Vec<u8> {
+        const BYTES_PER_LIMB: usize = 8;
+        let byte_len = F::BigInt::NUM_LIMBS * BYTES_PER_LIMB;
+
+        self.polynomial
+            .to_vec()
+            .into_iter()
+            .flat_map(|element| {
+                let mut bytes = element.into_bigint().to_bytes_be();
+                let padding = byte_len.saturating_sub(bytes.len());
+                std::iter::repeat(0)
+                    .take(padding)
+                    .chain(bytes.into_iter())
+            })
+            .collect()
+    }
     fn sum_polynomial(self, other: MultilinearPoly<F>) -> MultilinearPoly<F> {
         let mut new_poly = Vec::new();
 
@@ -80,14 +112,6 @@ impl<F: PrimeField> Multilinear<F> for MultilinearPoly<F> {
         }
         MultilinearPoly::new(new_poly)
     }
-    fn element_sum(self, other: MultilinearPoly<F>) -> MultilinearPoly<F> {
-        let mut new_poly = Vec::new();
-
-        for (i, var) in self.polynomial.iter().enumerate() {
-            new_poly.push(*var + other.polynomial[i]);
-        }
-        MultilinearPoly::new(new_poly)
-    }
     fn multiply_polynomial(self, other: MultilinearPoly<F>) -> MultilinearPoly<F> {
         let mut new_poly = Vec::new();
 
@@ -95,6 +119,14 @@ impl<F: PrimeField> Multilinear<F> for MultilinearPoly<F> {
             for other_var in other.polynomial.clone() {
                 new_poly.push(var * other_var);
             }
+        }
+        MultilinearPoly::new(new_poly)
+    }
+    fn element_sum(self, other: MultilinearPoly<F>) -> MultilinearPoly<F> {
+        let mut new_poly = Vec::new();
+
+        for (i, var) in self.polynomial.iter().enumerate() {
+            new_poly.push(*var + other.polynomial[i]);
         }
         MultilinearPoly::new(new_poly)
     }

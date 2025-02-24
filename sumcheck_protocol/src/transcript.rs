@@ -4,13 +4,13 @@ use sha3::{Digest, Keccak256};
 use std::marker::PhantomData;
 use std::mem::take;
 
-pub(crate) struct Transcript<K: HashTrait, F: PrimeField> {
+pub struct Transcript<K: HashTrait, F: PrimeField> {
     _field: PhantomData<fn() -> F>, // More idiomatic PhantomData usage
     hash_function: K,
 }
 
 impl<K: HashTrait, F: PrimeField> Transcript<K, F> {
-    pub(crate) fn init(hash_function: K) -> Self {
+    pub fn init(hash_function: K) -> Self {
         Self {
             _field: PhantomData,
             hash_function,

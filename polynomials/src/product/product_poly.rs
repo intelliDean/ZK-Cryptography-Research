@@ -3,7 +3,7 @@ use crate::multilinear::multilinear::{Multilinear, MultilinearPoly};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ProductPoly<F: PrimeField> {
-    product_poly: Vec<MultilinearPoly<F>>,
+   pub product_poly: Vec<MultilinearPoly<F>>,
     degree: usize,
 }
 
@@ -39,6 +39,28 @@ impl<F: PrimeField> ProductPoly<F> {
             result += poly.clone().full_evaluation(eval_at.clone());
         }
         result
+    }
+
+    //For GKR, I will be 2 polynomials but this function is made flexible to multiply any polynomial
+    pub fn multiply_element_by_element(&self) -> MultilinearPoly<F> {
+        assert!(self.product_poly.len() > 1, "Must be above 1");
+
+        let mut base_poly = self.product_poly[0].polynomial.to_vec();
+
+        for multilinear_poly in self.product_poly.iter().skip(1) {
+            for (i, var) in multilinear_poly.polynomial.iter().enumerate() {
+                base_poly[i] *= var
+            }
+        }
+        MultilinearPoly::new(base_poly)
+    }
+    pub fn convert_to_bytes(&self) -> Vec<u8> {
+        let mut bytes = Vec::new();
+
+        for polynomial in &self.product_poly {
+            bytes.extend_from_slice(&polynomial.convert_to_bytes());
+        }
+        bytes
     }
 }
 
@@ -102,5 +124,19 @@ mod tests {
         let new_poly = product_poly.full_evaluation(eval_at);
 
         println!("{:?}", new_poly);
+    }
+
+    #[test]
+    fn test_multiply_element_by_element() {
+        let polys = vec![
+            MultilinearPoly::new(to_field::<i32, Fr>(vec![2, 3])),
+            MultilinearPoly::new(to_field::<i32, Fr>(vec![3, 5])),
+            MultilinearPoly::new(to_field::<i32, Fr>(vec![6, 2])),
+        ];
+
+        let product_poly = ProductPoly::new(polys);
+        let result = product_poly.multiply_element_by_element();
+        assert_eq!(result, MultilinearPoly::new(to_field::<i32, Fr>(vec![36, 30])));
+
     }
 }

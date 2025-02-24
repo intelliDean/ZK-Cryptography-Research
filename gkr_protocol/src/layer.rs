@@ -3,7 +3,7 @@ use crate::gate::Gate;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Layer {
-    pub(crate) layers: Vec<Vec<Gate>>,
+    pub layers: Vec<Vec<Gate>>,
 }
 
 impl Layer {

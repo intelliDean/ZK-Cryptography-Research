@@ -2,7 +2,7 @@
 pub mod multilinear;
 pub mod univariate;
 mod product;
-mod sum;
+pub mod sum;
 
 
 pub fn bitwise() {

@@ -1,20 +1,20 @@
 use ark_ff::{BigInteger, Field, One, PrimeField, Zero};
 use ark_std::{test_rng, UniformRand};
 use ark_std::iterable::Iterable;
-use polynomials::univariate::point::Points;
-use polynomials::univariate::univariate_polynomial::UnivariatePoly;
+use polynomials::univariate::uni_poly::{Term, UnivariatePoly};
+use polynomials::univariate::uni_point::{Points, XAndY};
 
-
-/// Generate the polynomial for secret sharing
 fn generate_polynomial<F: PrimeField>(secret: F, degree: F) -> UnivariatePoly<F> {
     //UNIVARIATE POLYNOMIAL
     let mut rng = test_rng();
     // Start with the secret as the constant term
-    //adding the secret the 0 index, making it the constant
-    let mut coefficients = vec![(secret, F::zero())];
-    for i in 1..degree.into_bigint().as_ref()[0] {
-        // coefficients.push(F::from(rng.random_range(1..1000u64)));
-        coefficients.push((F::rand(&mut rng), F::from(i)));
+    let mut coefficients = vec![Term::new(secret, F::zero())];
+    // Generate random coefficients up to degree - 1
+    let degree_int = degree.into_bigint().as_ref()[0] as usize;
+    for i in 1..degree_int {
+        let coeff = F::rand(&mut rng);
+        let exp = F::from(i as u64);
+        coefficients.push(Term::new(coeff, exp));
     }
     UnivariatePoly::new(coefficients)
 }
@@ -24,16 +24,20 @@ fn generate_shares<F: PrimeField>(secret: F, num_shares: F, threshold: F) -> Poi
     let univariate_poly = generate_polynomial(secret, threshold);
 
     let mut shares = Vec::new();
-
     comp(num_shares, &univariate_poly, &mut shares);
     Points::new(shares)
 }
 
-pub fn comp<F: PrimeField>(num_shares: F, univariate_poly: &UnivariatePoly<F>, shares: &mut Vec<(F, F)>) {
-    for i in 1..=num_shares.into_bigint().as_ref()[0] {
-        let x = F::from(i);
-        let y = evaluate_poly_to_get_y(x, &univariate_poly);
-        shares.push((x, y));
+pub fn comp<F: PrimeField>(
+    num_shares: F,
+    univariate_poly: &UnivariatePoly<F>,
+    shares: &mut Vec<XAndY<F>>,
+) {
+    let num_shares_int = num_shares.into_bigint().as_ref()[0] as usize;
+    for i in 1..=num_shares_int {
+        let x = F::from(i as u64);
+        let y = evaluate_poly_to_get_y(x, univariate_poly);
+        shares.push(XAndY::new(x, y));
     }
 }
 
@@ -42,34 +46,29 @@ pub fn evaluate_poly_to_get_y<F: PrimeField>(x: F, univariate_poly: &UnivariateP
     univariate_poly
         .co_ex
         .iter()
-        .map(|(coeff, exp)| *coeff * x.pow(exp.into_bigint().as_ref()))
-        .sum()
+        .map(|term| term.coeff * x.pow(term.exp.into_bigint().as_ref()))
+        .fold(F::zero(), |acc, val| acc + val)
 }
 
-
-
-
-/// Reconstruct the secret from shares
-fn reconstruct_secret<F: PrimeField>(shares: &[(F, F)]) -> F {
+/// Reconstruct the secret from shares using Lagrange interpolation
+fn reconstruct_secret<F: PrimeField>(shares: &[XAndY<F>]) -> F {
     let mut secret = F::zero();
 
-    for (i, &(x_i, y_i)) in shares.iter().enumerate() {
+    for (i, point_i) in shares.iter().enumerate() {
         let mut numerator = F::one();
         let mut denominator = F::one();
 
-        for (j, &(x_j, _)) in shares.iter().enumerate() {
+        for (j, point_j) in shares.iter().enumerate() {
             if i != j {
-                numerator *= x_j;
-                denominator *= x_j - x_i;
+                numerator *= point_j.x;
+                denominator *= point_j.x - point_i.x;
             }
         }
 
-        // Use the modular inverse from PrimeField
         let denominator_inv = denominator
             .inverse()
             .expect("Denominator must have an inverse");
-
-        let term = y_i * numerator * denominator_inv;
+        let term = point_i.y * numerator * denominator_inv;
         secret += term;
     }
     secret
@@ -82,13 +81,12 @@ pub fn operation<F: PrimeField>(secret: F, num_shares: F, threshold: F) -> F {
     let shares = generate_shares(secret, num_shares, threshold);
 
     println!("Secret is divided into {} parts:", num_shares);
-    for (x, y) in &shares.x_y {
-        println!("x: {}, y: {}", x, y);
+    for point in &shares.points {
+        println!("x: {:?}, y: {:?}", point.x, point.y);
     }
 
-    let threshold_usize: usize = threshold.into_bigint().to_bytes_le()[0] as usize;
-
-    reconstruct_secret(&shares.x_y[0..threshold_usize])
+    let threshold_usize = threshold.into_bigint().as_ref()[0] as usize;
+    reconstruct_secret(&shares.points[0..threshold_usize])
 }
 
 #[cfg(test)]
@@ -117,7 +115,7 @@ mod tests {
         let shares = generate_shares(secret, num_share, threshold);
 
         assert_eq!(
-            shares.x_y.len(),
+            shares.points.len(),
             num_share.into_bigint().as_ref()[0] as usize
         );
     }
@@ -129,7 +127,7 @@ mod tests {
         let num_share = Fr::from(10);
         let coefficients = generate_shares(secret, num_share, threshold);
 
-        let reg_secret = reconstruct_secret(&coefficients.x_y);
+        let reg_secret = reconstruct_secret(&coefficients.points);
         assert_eq!(reg_secret, secret);
     }
 

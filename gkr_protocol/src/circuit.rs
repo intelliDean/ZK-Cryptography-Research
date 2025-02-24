@@ -1,8 +1,8 @@
 use crate::gate::{Gate, Ops};
 use crate::layer::Layer;
 use ark_ff::PrimeField;
-use std::marker::PhantomData;
 use polynomials::multilinear::multilinear::{Multilinear, MultilinearPoly};
+use std::marker::PhantomData;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Circuit<F: PrimeField> {
@@ -24,7 +24,7 @@ impl<F: PrimeField> Circuit<F> {
         // Initialize the witness layer with the inputs
         self.layer_witness.push(inputs);
 
-        let mut layers = self.circuit.layers.clone(); // Clone to avoid borrowing conflicts
+        let mut layers = self.circuit.layers.clone();
         layers.reverse();
         println!("Layers to evaluate: {:?}", layers);
         self.compute(&mut layers); // Compute all layers
@@ -104,23 +104,30 @@ impl<F: PrimeField> Circuit<F> {
         layer_index: usize,
     ) -> (MultilinearPoly<F>, MultilinearPoly<F>) {
         let number_of_layer_variables = num_of_layer_variables(layer_index);
+        //this shifts 1 the number of variable times e.g
+        // if num_var is 3, boolean_hypercube_combinations will be 8
         let boolean_hypercube_combinations = 1 << number_of_layer_variables; // 2 ^ number_of_layer_variables
 
+        //this initializes a vec with 0 depending on the number of boolean_hypercube_combinations
         let mut add_i_values = vec![F::default(); boolean_hypercube_combinations];
         let mut mul_i_values = vec![F::default(); boolean_hypercube_combinations];
 
+        //this gets the layer gates
         let layer = &self.circuit.layers[layer_index];
 
         for gate in layer.iter() {
+            //using the layer info, this gets which gate is valid
             let position_index =
                 combine_and_convert_to_decimal(layer_index, gate.output, gate.left, gate.right);
 
+            //this turns the valid gate from 0 to 1
             match gate.ops {
                 Ops::ADD => add_i_values[position_index] = F::one(),
                 Ops::MUL => mul_i_values[position_index] = F::one(),
             }
         }
 
+        //this will print out all the boolean hypercube combinations and their evaluation
         show_combinations(
             number_of_layer_variables,
             boolean_hypercube_combinations,
@@ -128,9 +135,11 @@ impl<F: PrimeField> Circuit<F> {
             &mut mul_i_values,
         );
 
+        //this turns it into MultilinearPoly
         let add_i_polynomial = MultilinearPoly::new(add_i_values);
         let mul_i_polynomial = MultilinearPoly::new(mul_i_values);
 
+        //returns the tuple of both add_1 and mul_i polynomial
         (add_i_polynomial, mul_i_polynomial)
     }
 }
@@ -143,54 +152,96 @@ fn show_combinations<F: PrimeField>(
 ) {
     println!("bhc - add_i - mul_i");
     for i in 0..boolean_hypercube_combinations {
-        let binary_combination = format!("{:0width$b}", i, width = number_of_layer_variables);
+        let binary_comb = format!("{:0width$b}", i, width = number_of_layer_variables);
         let add_eval = add_i_values[i];
         let mul_eval = mul_i_values[i];
 
-        println!(
-            "{}:  -  {}  -  {}",
-            binary_combination, add_eval, mul_eval
-        );
+        println!("{}:  -  {}  -  {}", binary_comb, add_eval, mul_eval);
     }
 }
 
+// fn show_combinations<F: PrimeField>(
+//     number_of_layer_variables: usize,
+//     add_i_values: &[F],
+//     mul_i_values: &[F],
+// ) {
+//     println!("bhc - add_i - mul_i");
+//
+//     // Calculate the number of combinations based on the number of layer variables
+//     let boolean_hypercube_combinations = 1 << number_of_layer_variables; // 2^number_of_layer_variables
+//
+//     for i in 0..boolean_hypercube_combinations {
+//         let binary_comb = format!("{:0width$b}", i, width = number_of_layer_variables);
+//         let add_eval = add_i_values[i];
+//         let mul_eval = mul_i_values[i];
+//
+//         println!("{}:  -  {}  -  {}", binary_comb, add_eval, mul_eval);
+//     }
+// }
+
 pub fn num_of_layer_variables(layer_index: usize) -> usize {
+    // if layer_index == 0 {
+    //     return 3;
+    // }
+    //
+    // let output = layer_index;
+    // let left = output + 1;
+    // let right = output + 1;
+    //
+    // let num_of_variables = output + left + right;
+    //
+    // num_of_variables
+
+    // Most concise version
     if layer_index == 0 {
-        return 3;
+        3
+    } else {
+        3 * layer_index + 2 // 3 x 1 + 2 = 5 for layer 1, 3 x 2 + 2 = 8 for layer 2, etc
     }
-
-    let var_a_length = layer_index;
-    let var_b_length = var_a_length + 1;
-    let var_c_length = var_a_length + 1;
-
-    let num_of_variables = var_a_length + var_b_length + var_c_length;
-
-    num_of_variables
 }
 
 pub fn combine_and_convert_to_decimal(
-    layer_index: usize,
-    variable_a: usize,
-    variable_b: usize,
-    variable_c: usize,
+    layer_idx: usize,
+    var_a: usize,
+    var_b: usize,
+    var_c: usize,
 ) -> usize {
-    // Convert each decimal number to a padded binary string
-    let a_binary = decimal_to_padded_binary(variable_a, layer_index);
-    let b_binary = decimal_to_padded_binary(variable_b, layer_index + 1);
-    let c_binary = decimal_to_padded_binary(variable_c, layer_index + 1);
+    let a_bits = layer_idx;
+    let bc_bits = layer_idx + 1;
 
-    // Combine the binary strings
-    let combined_binary = format!("{}{}{}", a_binary, b_binary, c_binary);
+    // Optional: Add bound checking
+    assert!(var_a < (1 << a_bits), "var_a too large");
+    assert!(var_b < (1 << bc_bits), "var_b too large");
+    assert!(var_c < (1 << bc_bits), "var_c too large");
 
-    // Convert the combined binary string back to a decimal number
-    usize::from_str_radix(&combined_binary, 2).expect("Failed to parse combined binary string")
+    let a_shifted = var_a << (2 * bc_bits);
+    let b_shifted = var_b << bc_bits;
+
+    a_shifted | b_shifted | var_c
 }
 
-
-pub fn decimal_to_padded_binary(decimal_number: usize, bit_length: usize) -> String {
-    format!("{:0>width$b}", decimal_number, width = bit_length)
-}
-
+//  TODO: I will use this if the above does not work
+// pub fn combine_and_convert_to_decimal(
+//     layer_index: usize,
+//     variable_a: usize,
+//     variable_b: usize,
+//     variable_c: usize,
+// ) -> usize {
+//     // Convert each decimal number to a padded binary string
+//     let a_binary = decimal_to_padded_binary(variable_a, layer_index);
+//     let b_binary = decimal_to_padded_binary(variable_b, layer_index + 1);
+//     let c_binary = decimal_to_padded_binary(variable_c, layer_index + 1);
+//
+//     // Combine the binary strings
+//     let combined_binary = format!("{}{}{}", a_binary, b_binary, c_binary);
+//
+//     // Convert the combined binary string back to a decimal number
+//     usize::from_str_radix(&combined_binary, 2).expect("Failed to parse combined binary string")
+// }
+//
+// pub fn decimal_to_padded_binary(decimal_number: usize, bit_length: usize) -> String {
+//     format!("{:0>width$b}", decimal_number, width = bit_length)
+// }
 
 #[cfg(test)]
 mod tests {

@@ -2,10 +2,9 @@
 resolver = "2"  # Use the new dependency resolver (requires Rust 1.51+)
 
 members = [
-#    "gkr_protocol",
     "polynomials",
-#    "bitwise_operations",
+    "shamir_secret_sharing",
     "sumcheck_protocol",
-    "shamir_secret_sharing", "sumcheck_protocol", "gkr_protocol",
+    "gkr_protocol", "polynomial_commitment_scheme",
 ]
 
