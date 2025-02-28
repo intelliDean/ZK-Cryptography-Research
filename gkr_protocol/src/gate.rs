@@ -1,4 +1,5 @@
 use ark_ff::PrimeField;
+use polynomials::multilinear::multilinear::{Multilinear, MultilinearPoly};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Ops {
@@ -12,6 +13,20 @@ impl Ops {
             Ops::ADD => *left + *right,
             Ops::MUL => *left * *right,
         }
+    }
+
+    pub fn cartesian_operations<F: PrimeField>(self, poly_a: &[F], poly_b: &[F]) -> MultilinearPoly<F> {
+        let new_eval: Vec<F> = poly_a
+            .iter()
+            .flat_map(|a| {
+                poly_b.iter().map({
+                    let op = self.clone();
+                    move |b| op.operation(a, b)
+                })
+            })
+            .collect();
+
+        MultilinearPoly::new(new_eval)
     }
 }
 

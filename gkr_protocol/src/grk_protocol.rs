@@ -12,7 +12,7 @@ use sumcheck_protocol::gkr_sumcheck::{
 };
 use sumcheck_protocol::transcript::{to_bytes, HashTrait, Transcript};
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct GKRProof<F: PrimeField> {
     output_poly: MultilinearPoly<F>,
     proof_polynomials: Vec<Vec<UnivariatePoly<F>>>,
@@ -28,7 +28,7 @@ pub fn prove <F: PrimeField> (circuit: &mut Circuit<F>, inputs: &[F]) -> GKRProo
     let mut w_0 = circuit_evaluations.first().unwrap().polynomial.to_vec();
 
     if w_0.len() == 1 { // if it's the final output of the circuit
-        w_0.push(F::from(0)); // add 0 to make it a valid evaluation multilinear
+        w_0.push(F::zero()); // add 0 to make it a valid evaluation multilinear
     }
     let output_poly = MultilinearPoly::new(w_0);
 
@@ -218,10 +218,10 @@ fn get_merged_fbc_poly<F: PrimeField> (
     let (add_i, mul_i) = circuit.add_i_and_mul_i_mle(layer_idx);
 
     let new_add_i =
-        add_i.multi_partial_evaluate(r_b).scale(alpha) + add_i.multi_partial_evaluate(r_c).scale(beta);
+        add_i.multi_partial_evaluate(r_b).multiply_by(alpha) + add_i.multi_partial_evaluate(r_c).multiply_by(beta);
 
     let new_mul_i =
-        mul_i.multi_partial_evaluate(r_b).scale(alpha) + mul_i.multi_partial_evaluate(r_c).scale(beta);
+        mul_i.multi_partial_evaluate(r_b).multiply_by(alpha) + mul_i.multi_partial_evaluate(r_c).multiply_by(beta);
 
     let summed_w_poly = tensor_add_mul_polynomials(w_b, w_c, Ops::ADD);
     let multiplied_w_poly = tensor_add_mul_polynomials(w_b, w_c, Ops::MUL);
@@ -272,11 +272,11 @@ fn get_merged_verifier_claim <F: PrimeField> (
 
     let (add_i, mul_i) = circuit.add_i_and_mul_i_mle(layer_idx);
 
-    let new_add_i = add_i.multi_partial_evaluate(prev_r_b).scale(alpha)
-        + add_i.multi_partial_evaluate(prev_r_c).scale(beta);
+    let new_add_i = add_i.multi_partial_evaluate(prev_r_b).multiply_by(alpha)
+        + add_i.multi_partial_evaluate(prev_r_c).multiply_by(beta);
 
-    let new_mul_i = mul_i.multi_partial_evaluate(prev_r_b).scale(alpha)
-        + mul_i.multi_partial_evaluate(prev_r_c).scale(beta);
+    let new_mul_i = mul_i.multi_partial_evaluate(prev_r_b).multiply_by(alpha)
+        + mul_i.multi_partial_evaluate(prev_r_c).multiply_by(beta);
 
     let a_r = new_add_i.full_evaluation(current_random_challenge.to_vec());
     let m_r = new_mul_i.full_evaluation(current_random_challenge.to_vec());

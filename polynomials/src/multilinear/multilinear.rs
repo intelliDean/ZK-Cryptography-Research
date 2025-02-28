@@ -10,8 +10,9 @@ pub struct MultilinearPoly<F: PrimeField> {
 pub trait Multilinear<F: PrimeField> {
     fn new(polynomial: Vec<F>) -> Self;
     fn partial_evaluation(self, var_pos: u32, eval_var_at: F) -> MultilinearPoly<F>;
+    fn full_evaluation(self, eval_at: Vec<F>) -> F;
     fn multi_partial_evaluate(&self, values: &[F]) -> Self;
-    fn scale(&self, value: F) -> Self;
+    fn multiply_by(&self, value: F) -> Self;
     fn convert_to_bytes(&self) -> Vec<u8>;
     fn tensor_add(self, other: MultilinearPoly<F>) -> MultilinearPoly<F>;
     fn tensor_multiply(self, other: MultilinearPoly<F>) -> MultilinearPoly<F>;
@@ -37,7 +38,7 @@ pub trait Multilinear<F: PrimeField> {
     }
 
     fn partial_evaluation2(self, var_pos: u32, eval_var_at: F) -> MultilinearPoly<F>;
-    fn full_evaluation(self, eval_at: Vec<F>) -> F;
+
 }
 
 impl<F: PrimeField> Multilinear<F> for MultilinearPoly<F> {
@@ -77,6 +78,23 @@ impl<F: PrimeField> Multilinear<F> for MultilinearPoly<F> {
         MultilinearPoly::new(new_polynomial)
     }
 
+    fn full_evaluation(mut self, eval_at: Vec<F>) -> F {
+        let num_vars = eval_at.len() as u32;
+        assert_eq!(
+            self.num_var(),
+            num_vars,
+            "Invalid number of vars: {}",
+            num_vars
+        );
+
+        for eval_value in eval_at {
+            //this always starts from the beginning, first with a;
+            // then b becomes the first next time
+            self = self.partial_evaluation(0, eval_value);
+        }
+
+        self.polynomial.pop().unwrap()
+    }
 
     fn multi_partial_evaluate(&self, values: &[F]) -> Self {
         if values.len() > self.num_var() as usize {
@@ -92,7 +110,22 @@ impl<F: PrimeField> Multilinear<F> for MultilinearPoly<F> {
         poly
     }
 
-    fn scale(&self, value: F) -> Self {
+
+    // fn multi_partial_evaluate(&self, values: &[F]) -> Self {
+    //     if values.len() > self.num_var() as usize {
+    //         panic!("Invalid number of values");
+    //     }
+    //
+    //     let mut poly = self.clone();
+    //
+    //     for value in values {
+    //         poly = poly.partial_evaluation(0, *value);
+    //     }
+    //
+    //     poly
+    // }
+
+    fn multiply_by(&self, value: F) -> Self {
         let result = self.polynomial.iter().map(|eval| *eval * value).collect();
 
         Self::new(result)
@@ -127,20 +160,6 @@ impl<F: PrimeField> Multilinear<F> for MultilinearPoly<F> {
 
         MultilinearPoly::new(new_poly)
     }
-
-    // fn cartesian_add_mul<F: PrimeField>(poly_a: &[F], poly_b: &[F], op: Ops) -> MultilinearPoly<F> {
-    //     let new_eval: Vec<F> = poly_a
-    //         .iter()
-    //         .flat_map(|a| {
-    //             poly_b.iter().map({
-    //                 let op = op.clone();
-    //                 move |b| op.operation(a, b)
-    //             })
-    //         })
-    //         .collect();
-    //
-    //     MultilinearPoly::new(new_eval)
-    // }
 
     // multiplying each element in the polynomial to each element in the other polynomial
     fn tensor_multiply(self, other: MultilinearPoly<F>) -> MultilinearPoly<F> {
@@ -234,36 +253,7 @@ impl<F: PrimeField> Multilinear<F> for MultilinearPoly<F> {
         }
     }
 
-    fn full_evaluation(mut self, eval_at: Vec<F>) -> F {
-        let num_vars = eval_at.len() as u32;
-        assert_eq!(
-            self.polynomial.len().ilog2(),
-            num_vars,
-            "Invalid number of vars: {}",
-            num_vars
-        );
 
-        for eval_value in eval_at {
-            //this always starts from the beginning, first with a;
-            // then b becomes the first next time
-            self = self.partial_evaluation(0, eval_value);
-        }
-        self.polynomial.pop().unwrap()
-    }
-
-    // fn evaluate_all(&self, values: Vec<F>) -> F {
-    //     if values.len() != self.num_var() as usize {
-    //         panic!("Invalid number of values");
-    //     }
-    //
-    //     let mut result = self.clone();
-    //
-    //     for value in values.iter() {
-    //         result = result.partial_evaluate(0, value);
-    //     }
-    //
-    //     result.polynomial.pop().unwrap()
-    // }
 
 }
 

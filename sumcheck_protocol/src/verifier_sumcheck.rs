@@ -53,9 +53,8 @@ mod tests {
 
         let proof = prover_proves_claim(poly.clone());
 
-        let v_poly = MultilinearPoly {
-            polynomial: p,
-        };
+        let v_poly = MultilinearPoly::new(p);
+
         let verify = verifier_verifies_provers_claim(&proof, v_poly.clone());
 
         assert_eq!(verify, true);

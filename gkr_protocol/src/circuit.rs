@@ -94,6 +94,7 @@ impl<F: PrimeField> Circuit<F> {
     }
     //This returns a layer w_i when the circuit are already evaluated
     pub fn w_i_polynomial(&self, layer_index: usize) -> MultilinearPoly<F> {
+
         if layer_index >= self.clone().layer_witness.len() {
             return MultilinearPoly::new(vec![]);
         }
