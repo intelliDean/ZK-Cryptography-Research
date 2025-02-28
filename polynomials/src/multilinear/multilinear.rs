@@ -79,27 +79,19 @@ impl<F: PrimeField> Multilinear<F> for MultilinearPoly<F> {
     }
 
     fn full_evaluation(mut self, eval_at: Vec<F>) -> F {
-        let num_vars = eval_at.len() as u32;
-        assert_eq!(
-            self.num_var(),
-            num_vars,
-            "Invalid number of vars: {}",
-            num_vars
-        );
-
-        for eval_value in eval_at {
-            //this always starts from the beginning, first with a;
-            // then b becomes the first next time
-            self = self.partial_evaluation(0, eval_value);
-        }
+       self = self.multi_partial_evaluate(&eval_at);
 
         self.polynomial.pop().unwrap()
     }
 
     fn multi_partial_evaluate(&self, values: &[F]) -> Self {
-        if values.len() > self.num_var() as usize {
-            panic!("Invalid number of values");
-        }
+        let num_vars = values.len() as u32;
+        assert!(
+            self.num_var() >=
+            num_vars,
+            "Invalid number of vars: {}",
+            num_vars
+        );
 
         let mut poly = self.clone();
 
@@ -109,21 +101,6 @@ impl<F: PrimeField> Multilinear<F> for MultilinearPoly<F> {
 
         poly
     }
-
-
-    // fn multi_partial_evaluate(&self, values: &[F]) -> Self {
-    //     if values.len() > self.num_var() as usize {
-    //         panic!("Invalid number of values");
-    //     }
-    //
-    //     let mut poly = self.clone();
-    //
-    //     for value in values {
-    //         poly = poly.partial_evaluation(0, *value);
-    //     }
-    //
-    //     poly
-    // }
 
     fn multiply_by(&self, value: F) -> Self {
         let result = self.polynomial.iter().map(|eval| *eval * value).collect();
