@@ -7,4 +7,3 @@ members = [
     "sumcheck_protocol",
     "gkr_protocol", "polynomial_commitment_scheme",
 ]
-

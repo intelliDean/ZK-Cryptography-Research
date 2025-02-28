@@ -1,7 +1,7 @@
 use ark_ff::PrimeField;
 
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) enum Ops {
+pub enum Ops {
     ADD,
     MUL,
 }
@@ -16,12 +16,12 @@ impl Ops {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct Gate {
+pub struct Gate {
     // gate is basically the index position of the real values
-    pub(crate) output: usize,   // the evaluation between left and right due to the ops
-    pub(crate) left: usize, // i used usize for the left and right index
-    pub(crate) right: usize,
-    pub(crate) ops: Ops, // an enum of Operations
+    pub output: usize,   // the evaluation between left and right due to the ops
+    pub left: usize, // i used usize for the left and right index
+    pub right: usize,
+    pub ops: Ops, // an enum of Operations
 }
 
 impl Gate {

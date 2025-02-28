@@ -16,3 +16,6 @@ ff = "0.13.0"
 [lib]
 name = "polynomials"
 path = "src/lib.rs"
+
+
+gkr_protocol = { path = "../gkr_protocol"}

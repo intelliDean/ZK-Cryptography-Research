@@ -1,20 +1,20 @@
 use crate::gate::{Gate, Ops};
-use crate::layer::Layer;
 use ark_ff::PrimeField;
 use polynomials::multilinear::multilinear::{Multilinear, MultilinearPoly};
 use std::marker::PhantomData;
+use crate::layer::Layer;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Circuit<F: PrimeField> {
-    pub circuit: Layer,
+    pub layers: Vec<Layer>,
     pub layer_witness: Vec<MultilinearPoly<F>>,
     _phantom: PhantomData<F>,
 }
 
 impl<F: PrimeField> Circuit<F> {
-    fn new(layers: Layer) -> Self {
+    pub(crate) fn new(layers: Vec<Layer>) -> Self {
         Circuit {
-            circuit: layers,
+            layers,
             layer_witness: Vec::new(),
             _phantom: PhantomData,
         }
@@ -24,20 +24,21 @@ impl<F: PrimeField> Circuit<F> {
         // Initialize the witness layer with the inputs
         self.layer_witness.push(inputs);
 
-        let mut layers = self.circuit.layers.clone();
-        layers.reverse();
-        println!("Layers to evaluate: {:?}", layers);
-        self.compute(&mut layers); // Compute all layers
+        let mut circuit = self.layers.clone();
+        circuit.reverse();
+        println!("Layers to evaluate: {:?}", circuit);
+        self.compute(&mut circuit); // Compute all layers
 
+        self.layer_witness.reverse();
         self.layer_witness.clone() // Return all computed layer evaluations
     }
-    //This returns a layer w_i before it's all evaluated
+    //This returns a layer w_i by evaluating the circuit up to the layer index
     pub fn partial_circuit_run(
         &mut self,
         inputs: MultilinearPoly<F>,
         layer_id: usize,
     ) -> MultilinearPoly<F> {
-        let length = self.circuit.layers.len();
+        let length = self.layers.len();
         println!("Circuit length: {}", length);
         match layer_id {
             // If layer_id == self.circuit.layers.len(),
@@ -50,12 +51,12 @@ impl<F: PrimeField> Circuit<F> {
 
             _ => {
                 // run the code with any other inputs
-                self.circuit.layers.reverse();
+                self.layers.reverse();
                 self.layer_witness.push(inputs);
                 let idx = length - 1 - layer_id;
 
                 // Convert to Vec to avoid borrowing `self`
-                let mut layers = self.circuit.layers[..=idx].to_vec();
+                let mut layers = self.layers[..=idx].to_vec();
 
                 self.compute(&mut layers); // this will compute up to the layer_id
 
@@ -64,15 +65,15 @@ impl<F: PrimeField> Circuit<F> {
         }
     }
 
-    fn compute(&mut self, layers: &mut [Vec<Gate>]) {
-        for layer in layers {
+    fn compute(&mut self, circuit: &mut [Layer]) {
+        for layer in circuit {
             // this will make use of the last layer
             // which was last pushed into the vec as the current layer
             if let Some(current_layer) = self.layer_witness.last() {
                 // let mut witness = Vec::with_capacity(layer.len()); // Allocate space for new layer
-                let mut witness = vec![F::from(0); layer.len()];
+                let mut witness = vec![F::from(0); layer.gates.len()];
 
-                for gate in layer {
+                for mut gate in &layer.gates {
                     let left_value = &current_layer.polynomial[gate.left];
                     let right_value = &current_layer.polynomial[gate.right];
 
@@ -91,7 +92,7 @@ impl<F: PrimeField> Circuit<F> {
             }
         }
     }
-    //This returns a layer w_i when it's all evaluated
+    //This returns a layer w_i when the circuit are already evaluated
     pub fn w_i_polynomial(&self, layer_index: usize) -> MultilinearPoly<F> {
         if layer_index >= self.clone().layer_witness.len() {
             return MultilinearPoly::new(vec![]);
@@ -113,10 +114,11 @@ impl<F: PrimeField> Circuit<F> {
         let mut mul_i_values = vec![F::default(); boolean_hypercube_combinations];
 
         //this gets the layer gates
-        let layer = &self.circuit.layers[layer_index];
+        let layer = &self.layers[layer_index];
 
-        for gate in layer.iter() {
+        for gate in layer.gates.iter() {
             //using the layer info, this gets which gate is valid
+            println!("layer_idx: {}, a: {}, b: {}, c: {}", layer_index, gate.output, gate.left, gate.right);
             let position_index =
                 combine_and_convert_to_decimal(layer_index, gate.output, gate.left, gate.right);
 
@@ -130,7 +132,6 @@ impl<F: PrimeField> Circuit<F> {
         //this will print out all the boolean hypercube combinations and their evaluation
         show_combinations(
             number_of_layer_variables,
-            boolean_hypercube_combinations,
             &mut add_i_values,
             &mut mul_i_values,
         );
@@ -146,11 +147,14 @@ impl<F: PrimeField> Circuit<F> {
 
 fn show_combinations<F: PrimeField>(
     number_of_layer_variables: usize,
-    boolean_hypercube_combinations: usize,
-    add_i_values: &mut Vec<F>,
-    mul_i_values: &mut Vec<F>,
+    add_i_values: &[F],
+    mul_i_values: &[F],
 ) {
     println!("bhc - add_i - mul_i");
+
+    // Calculate the number of combinations based on the number of layer variables
+    let boolean_hypercube_combinations = 1 << number_of_layer_variables; // 2^number_of_layer_variables
+
     for i in 0..boolean_hypercube_combinations {
         let binary_comb = format!("{:0width$b}", i, width = number_of_layer_variables);
         let add_eval = add_i_values[i];
@@ -160,38 +164,7 @@ fn show_combinations<F: PrimeField>(
     }
 }
 
-// fn show_combinations<F: PrimeField>(
-//     number_of_layer_variables: usize,
-//     add_i_values: &[F],
-//     mul_i_values: &[F],
-// ) {
-//     println!("bhc - add_i - mul_i");
-//
-//     // Calculate the number of combinations based on the number of layer variables
-//     let boolean_hypercube_combinations = 1 << number_of_layer_variables; // 2^number_of_layer_variables
-//
-//     for i in 0..boolean_hypercube_combinations {
-//         let binary_comb = format!("{:0width$b}", i, width = number_of_layer_variables);
-//         let add_eval = add_i_values[i];
-//         let mul_eval = mul_i_values[i];
-//
-//         println!("{}:  -  {}  -  {}", binary_comb, add_eval, mul_eval);
-//     }
-// }
-
 pub fn num_of_layer_variables(layer_index: usize) -> usize {
-    // if layer_index == 0 {
-    //     return 3;
-    // }
-    //
-    // let output = layer_index;
-    // let left = output + 1;
-    // let right = output + 1;
-    //
-    // let num_of_variables = output + left + right;
-    //
-    // num_of_variables
-
     // Most concise version
     if layer_index == 0 {
         3
@@ -220,29 +193,6 @@ pub fn combine_and_convert_to_decimal(
     a_shifted | b_shifted | var_c
 }
 
-//  TODO: I will use this if the above does not work
-// pub fn combine_and_convert_to_decimal(
-//     layer_index: usize,
-//     variable_a: usize,
-//     variable_b: usize,
-//     variable_c: usize,
-// ) -> usize {
-//     // Convert each decimal number to a padded binary string
-//     let a_binary = decimal_to_padded_binary(variable_a, layer_index);
-//     let b_binary = decimal_to_padded_binary(variable_b, layer_index + 1);
-//     let c_binary = decimal_to_padded_binary(variable_c, layer_index + 1);
-//
-//     // Combine the binary strings
-//     let combined_binary = format!("{}{}{}", a_binary, b_binary, c_binary);
-//
-//     // Convert the combined binary string back to a decimal number
-//     usize::from_str_radix(&combined_binary, 2).expect("Failed to parse combined binary string")
-// }
-//
-// pub fn decimal_to_padded_binary(decimal_number: usize, bit_length: usize) -> String {
-//     format!("{:0>width$b}", decimal_number, width = bit_length)
-// }
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -252,24 +202,24 @@ mod tests {
     fn get_layer() -> Layer {
         Layer::new(vec![Gate::new(0, 0, 1, Ops::MUL)])
     }
-    fn get_circuit() -> Circuit<Fr> {
-        let mut layers = get_layer();
+    pub fn get_circuit() -> Circuit<Fr> {
+        let layer0 = Layer::new(vec![Gate::new(0, 0, 1, Ops::MUL)]);
 
-        let layer1 = vec![Gate::new(0, 0, 1, Ops::MUL), Gate::new(1, 2, 3, Ops::ADD)];
+        let layer1 = Layer::new(vec![Gate::new(0, 0, 1, Ops::MUL), Gate::new(1, 2, 3, Ops::ADD)]);
 
-        let layer2 = vec![
+        let layer2 = Layer::new( vec![
             Gate::new(0, 0, 1, Ops::MUL),
             Gate::new(1, 2, 3, Ops::ADD),
             Gate::new(2, 4, 5, Ops::ADD),
             Gate::new(3, 6, 7, Ops::MUL),
-        ];
+        ]);
 
-        layers.update_layer_gate(layer1.clone());
-        layers.update_layer_gate(layer2.clone());
+        let circuit = vec![layer0, layer1, layer2];
 
-        println!("Layers: {:?}", &layers);
 
-        Circuit::new(layers.clone())
+        println!("Layers: {:?}", &circuit);
+
+        Circuit::new(circuit)
     }
 
     fn get_input() -> MultilinearPoly<Fr> {
@@ -291,10 +241,31 @@ mod tests {
         let input = get_input();
         let res = circuit.run_circuit(input.clone());
 
-        let w_i = circuit.add_i_and_mul_i_mle(0);
+        let w_i = circuit.add_i_and_mul_i_mle(1);
         // let expected_layer = MultilinearPoly::new(to_field(vec![2, 7, 11, 56]));
         println!("res: {:?}", w_i);
         // assert_eq!(w_i, expected_layer);
+    }
+
+    #[test]
+    fn test_num_of_layer_variables() {
+        // Assert Equal
+        assert_eq!(num_of_layer_variables(0), 3);
+        assert_eq!(num_of_layer_variables(1), 5);
+        assert_eq!(num_of_layer_variables(2), 8);
+        assert_eq!(num_of_layer_variables(3), 11);
+        assert_eq!(num_of_layer_variables(4), 14);
+
+        // Assert Not Equal
+        assert_ne!(num_of_layer_variables(2), 7);
+        assert_ne!(num_of_layer_variables(3), 9);
+    }
+
+    #[test]
+    fn test_combine_and_convert_to_decimal() {
+
+        let res = combine_and_convert_to_decimal(1, 0, 0, 1);
+        println!("res: {:?}", res);
     }
 
     #[test]
@@ -330,10 +301,10 @@ mod tests {
         assert_eq!(
             result,
             vec![
-                get_input(),
-                MultilinearPoly::new(vec![Fr::from(2), Fr::from(7), Fr::from(11), Fr::from(56)]),
+                MultilinearPoly::new(vec![Fr::from(938)]),
                 MultilinearPoly::new(vec![Fr::from(14), Fr::from(67)]),
-                MultilinearPoly::new(vec![Fr::from(938)])
+                MultilinearPoly::new(vec![Fr::from(2), Fr::from(7), Fr::from(11), Fr::from(56)]),
+                get_input(),
             ]
         );
     }

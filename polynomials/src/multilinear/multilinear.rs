@@ -1,3 +1,4 @@
+use std::ops::{Add, Mul};
 use ark_ff::{BigInteger, PrimeField};
 use num_traits::{NumCast, ToPrimitive};
 
@@ -9,14 +10,18 @@ pub struct MultilinearPoly<F: PrimeField> {
 pub trait Multilinear<F: PrimeField> {
     fn new(polynomial: Vec<F>) -> Self;
     fn partial_evaluation(self, var_pos: u32, eval_var_at: F) -> MultilinearPoly<F>;
+    fn multi_partial_evaluate(&self, values: &[F]) -> Self;
+    fn scale(&self, value: F) -> Self;
     fn convert_to_bytes(&self) -> Vec<u8>;
-    fn sum_polynomial(self, other: MultilinearPoly<F>) -> MultilinearPoly<F>;
-    fn multiply_polynomial(self, other: MultilinearPoly<F>) -> MultilinearPoly<F>;
+    fn tensor_add(self, other: MultilinearPoly<F>) -> MultilinearPoly<F>;
+    fn tensor_multiply(self, other: MultilinearPoly<F>) -> MultilinearPoly<F>;
     fn element_sum(self, other: MultilinearPoly<F>) -> MultilinearPoly<F>;
+    fn num_var(&self) -> u32;
+    fn scalar_mul(self, field_element: F) -> Self;
 
-    /// Generates pairs of indices for partial evaluation.
+    /// generates pairs of indices for partial evaluation.
     /// `index` is the position of the variable to evaluate, and `n_vars` is the total number of variables.
-    fn pairs(index: usize, n_vars: usize) -> impl Iterator<Item=(usize, usize)> {
+    fn pairs(index: usize, n_vars: usize) -> impl Iterator<Item = (usize, usize)> {
         let inverted_index = n_vars - index - 1;
         (0..(1 << (n_vars - 1))).map(move |val| {
             let insert_zero = Self::insert_bit(val, inverted_index);
@@ -72,20 +77,26 @@ impl<F: PrimeField> Multilinear<F> for MultilinearPoly<F> {
         MultilinearPoly::new(new_polynomial)
     }
 
-    // fn convert_to_bytes(&self) -> Vec<u8>  {
-    //     let mut bytes = Vec::new();
-    //     let byte_len = F::BigInt::NUM_LIMBS * 8; // Each limb is 8 bytes
-    //
-    //     for element in self.polynomial.to_vec() {
-    //         let element_bytes = element.into_bigint().to_bytes_be();
-    //         // Pad the bytes to ensure consistent length
-    //         bytes.extend_from_slice(&element_bytes);
-    //         if element_bytes.len() < byte_len {
-    //             bytes.extend(vec![0; byte_len - element_bytes.len()]);
-    //         }
-    //     }
-    //     bytes
-    // }
+
+    fn multi_partial_evaluate(&self, values: &[F]) -> Self {
+        if values.len() > self.num_var() as usize {
+            panic!("Invalid number of values");
+        }
+
+        let mut poly = self.clone();
+
+        for value in values {
+            poly = poly.partial_evaluation(0, *value);
+        }
+
+        poly
+    }
+
+    fn scale(&self, value: F) -> Self {
+        let result = self.polynomial.iter().map(|eval| *eval * value).collect();
+
+        Self::new(result)
+    }
     fn convert_to_bytes(&self) -> Vec<u8> {
         const BYTES_PER_LIMB: usize = 8;
         let byte_len = F::BigInt::NUM_LIMBS * BYTES_PER_LIMB;
@@ -96,39 +107,85 @@ impl<F: PrimeField> Multilinear<F> for MultilinearPoly<F> {
             .flat_map(|element| {
                 let mut bytes = element.into_bigint().to_bytes_be();
                 let padding = byte_len.saturating_sub(bytes.len());
-                std::iter::repeat(0)
-                    .take(padding)
-                    .chain(bytes.into_iter())
+                std::iter::repeat(0).take(padding).chain(bytes.into_iter())
             })
             .collect()
     }
-    fn sum_polynomial(self, other: MultilinearPoly<F>) -> MultilinearPoly<F> {
-        let mut new_poly = Vec::new();
 
-        for var in self.polynomial {
-            for other_var in other.polynomial.clone() {
-                new_poly.push(var + other_var);
-            }
-        }
+    // adding each element in the polynomial to each element in the other polynomial
+    fn tensor_add(self, other: MultilinearPoly<F>) -> MultilinearPoly<F> {
+        let new_poly: Vec<F> = self
+            .polynomial
+            .into_iter()
+            .flat_map(|var| {
+                other
+                    .polynomial
+                    .iter()
+                    .map(move |&other_var| var + other_var)
+            })
+            .collect();
+
         MultilinearPoly::new(new_poly)
     }
-    fn multiply_polynomial(self, other: MultilinearPoly<F>) -> MultilinearPoly<F> {
-        let mut new_poly = Vec::new();
 
-        for var in self.polynomial {
-            for other_var in other.polynomial.clone() {
-                new_poly.push(var * other_var);
-            }
-        }
+    // fn cartesian_add_mul<F: PrimeField>(poly_a: &[F], poly_b: &[F], op: Ops) -> MultilinearPoly<F> {
+    //     let new_eval: Vec<F> = poly_a
+    //         .iter()
+    //         .flat_map(|a| {
+    //             poly_b.iter().map({
+    //                 let op = op.clone();
+    //                 move |b| op.operation(a, b)
+    //             })
+    //         })
+    //         .collect();
+    //
+    //     MultilinearPoly::new(new_eval)
+    // }
+
+    // multiplying each element in the polynomial to each element in the other polynomial
+    fn tensor_multiply(self, other: MultilinearPoly<F>) -> MultilinearPoly<F> {
+        let new_poly: Vec<F> = self
+            .polynomial
+            .into_iter()
+            .flat_map(|var| {
+                other
+                    .polynomial
+                    .iter()
+                    .map(move |&other_var| var * other_var)
+            })
+            .collect();
+
         MultilinearPoly::new(new_poly)
     }
     fn element_sum(self, other: MultilinearPoly<F>) -> MultilinearPoly<F> {
-        let mut new_poly = Vec::new();
+        assert_eq!(
+            self.polynomial.len(),
+            other.polynomial.len(),
+            "Inconsistent polynomials"
+        );
 
-        for (i, var) in self.polynomial.iter().enumerate() {
-            new_poly.push(*var + other.polynomial[i]);
-        }
+        let new_poly: Vec<F> = self
+            .polynomial
+            .into_iter()
+            .zip(other.polynomial)
+            .map(|(a, b)| a + b)
+            .collect();
+
         MultilinearPoly::new(new_poly)
+    }
+
+    fn num_var(&self) -> u32 {
+        self.polynomial.len().ilog2()
+    }
+
+    fn scalar_mul(self, field_element: F) -> Self {
+        let scaled_values: Vec<F> = self
+            .polynomial
+            .iter()
+            .map(|value| *value * field_element)
+            .collect();
+
+        MultilinearPoly::new(scaled_values)
     }
 
     //partial evaluation taking a vec of PrimeField
@@ -179,7 +236,12 @@ impl<F: PrimeField> Multilinear<F> for MultilinearPoly<F> {
 
     fn full_evaluation(mut self, eval_at: Vec<F>) -> F {
         let num_vars = eval_at.len() as u32;
-        assert_eq!(self.polynomial.len().ilog2(), num_vars, "Invalid number of vars: {}", num_vars);
+        assert_eq!(
+            self.polynomial.len().ilog2(),
+            num_vars,
+            "Invalid number of vars: {}",
+            num_vars
+        );
 
         for eval_value in eval_at {
             //this always starts from the beginning, first with a;
@@ -188,6 +250,21 @@ impl<F: PrimeField> Multilinear<F> for MultilinearPoly<F> {
         }
         self.polynomial.pop().unwrap()
     }
+
+    // fn evaluate_all(&self, values: Vec<F>) -> F {
+    //     if values.len() != self.num_var() as usize {
+    //         panic!("Invalid number of values");
+    //     }
+    //
+    //     let mut result = self.clone();
+    //
+    //     for value in values.iter() {
+    //         result = result.partial_evaluate(0, value);
+    //     }
+    //
+    //     result.polynomial.pop().unwrap()
+    // }
+
 }
 
 pub fn partial_evaluation_with_u32(
@@ -232,6 +309,35 @@ pub fn partial_evaluation_with_u32(
     }
 
     new_polynomial
+}
+
+impl<F: PrimeField> Mul for MultilinearPoly<F> {
+    type Output = Self;
+
+    fn mul(self, other: Self) -> Self {
+        let result = self
+            .polynomial
+            .iter()
+            .zip(other.polynomial.iter())
+            .map(|(a, b)| *a * *b)
+            .collect();
+
+        MultilinearPoly::new(result)
+    }
+}
+impl<F: PrimeField> Add for MultilinearPoly<F> {
+    type Output = Self;
+
+    fn add(self, other: Self) -> Self {
+        let result = self
+            .polynomial
+            .iter()
+            .zip(other.polynomial.iter())
+            .map(|(a, b)| *a + *b)
+            .collect();
+
+        MultilinearPoly::new(result)
+    }
 }
 
 pub fn to_field<T, F: PrimeField>(poly: Vec<T>) -> Vec<F>
@@ -282,7 +388,7 @@ mod tests {
         let poly1: MultilinearPoly<Fr> = MultilinearPoly::new(to_field(vec![3, 3, 3, 5]));
         let poly2 = MultilinearPoly::new(to_field(vec![6, 8]));
 
-        let result = poly1.sum_polynomial(poly2);
+        let result = poly1.tensor_add(poly2);
         let expected_poly = MultilinearPoly::new(to_field(vec![9, 11, 9, 11, 9, 11, 11, 13]));
 
         assert_eq!(result, expected_poly);
@@ -303,7 +409,7 @@ mod tests {
         let poly1: MultilinearPoly<Fr> = MultilinearPoly::new(to_field(vec![3, 5]));
         let poly2 = MultilinearPoly::new(to_field(vec![2, 3, 5]));
 
-        let result = poly1.multiply_polynomial(poly2);
+        let result = poly1.tensor_multiply(poly2);
         let expected_poly = MultilinearPoly::new(to_field(vec![6, 9, 15, 10, 15, 25]));
 
         assert_eq!(result, expected_poly);

@@ -25,6 +25,26 @@ impl<K: HashTrait, F: PrimeField> Transcript<K, F> {
         let hash_output = self.hash_function.generate_hash();
         F::from_be_bytes_mod_order(&hash_output)
     }
+
+    pub fn generate_random_challenge(&mut self) -> F {
+        let random_challenge = self.hash_function.generate_hash();
+        self.absorb(&random_challenge); // Feed it back into the transcript
+        F::from_le_bytes_mod_order(&random_challenge)
+    }
+}
+
+pub fn to_bytes<F: PrimeField>(values: &[F]) -> Vec<u8> {
+    const BYTES_PER_LIMB: usize = 8;
+    let byte_len = F::BigInt::NUM_LIMBS * BYTES_PER_LIMB;
+
+    values
+        .iter()
+        .flat_map(|x| {
+            let mut bytes = x.into_bigint().to_bytes_be();
+            let padding = byte_len.saturating_sub(bytes.len());
+            std::iter::repeat(0).take(padding).chain(bytes.into_iter())
+        })
+        .collect()
 }
 
 pub trait HashTrait {

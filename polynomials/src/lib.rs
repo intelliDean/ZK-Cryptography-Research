@@ -1,7 +1,7 @@
 
 pub mod multilinear;
 pub mod univariate;
-mod product;
+pub mod product;
 pub mod sum;
 
 

@@ -1,1 +1,1 @@
-pub(crate) mod product_poly;
+pub mod product_poly;
