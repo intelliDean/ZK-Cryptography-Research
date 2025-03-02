@@ -69,7 +69,7 @@ impl<F: PrimeField> UnivariatePoly<F> {
         Points { points } // Return Points with the collected Vec
     }
 
-    fn divide_polynomials(
+    pub fn divide_polynomials(
         self,
         divisor: UnivariatePoly<F>,
     ) -> (UnivariatePoly<F>, UnivariatePoly<F>) {

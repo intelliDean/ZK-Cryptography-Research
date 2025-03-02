@@ -1,12 +1,13 @@
-use ark_bn254::{Bn254, Fr, FrConfig, G1Projective as G1, G2Projective as G2};
+use ark_bn254::{Bn254, Config, Fr, FrConfig, G1Projective as G1, G2Projective as G2};
 // Use BLS12-381 if you want
 use ark_ec::bls12::G1Projective;
 use ark_ec::pairing::Pairing;
+use ark_ec::twisted_edwards::Projective;
 use ark_ec::{PrimeGroup, VariableBaseMSM};
 use ark_ff::{Field, Fp, MontBackend, PrimeField, UniformRand};
 use ark_poly::Polynomial;
 use ark_std::test_rng;
-use polynomials::univariate::uni_poly::UnivariatePoly;
+use polynomials::univariate::uni_poly::{Term, UnivariatePoly};
 use std::borrow::Borrow;
 use std::ops::Mul;
 // use ark_poly::univariate::DensePolynomial;
@@ -98,12 +99,49 @@ impl TrustedSetup {
         (g1_powers, g2)
     }
 
-    pub fn open_polynomial<F: PrimeField>(uni_poly: UnivariatePoly<F>, eval_at: F) -> F {
-        uni_poly.full_coeff_evaluation(eval_at)
+    pub fn open_polynomial<F: PrimeField + Borrow<Fp<MontBackend<FrConfig, 4>, 4>>>(
+        &self,
+        uni_poly: UnivariatePoly<F>,
+        eval_at: F,
+    ) -> (F, F, G1) {
+        let v = uni_poly.full_coeff_evaluation(eval_at);
+
+        for mut term in uni_poly.co_ex.clone() {
+            if term.exp == F::zero() {
+                term.coeff = term.coeff - v;
+                break;
+            }
+        }
+
+        let divisor = UnivariatePoly::new(vec![
+            Term::new(F::one(), F::one()),
+            Term::new(eval_at, F::zero()),
+        ]);
+
+        let q_x = uni_poly.divide_polynomials(divisor);
+        let mut dense = vec![F::zero(); q_x.0.co_ex.len()];
+
+        for q in q_x.0.co_ex.clone() {
+            dense[q.exp.into_bigint().as_ref()[0] as usize] += q.coeff;
+        }
+
+        let mut q_t = G1::default();
+
+        for i in 0..dense.len() {
+            let res = self.powers_of_tau[i].mul(dense[i]);
+            q_t += res;
+        }
+
+        println!("Result: {:?}", dense);
+        println!("Result: {:?}", q_t);
+
+        (eval_at, v, q_t)
     }
+
+    // pub fn verifier_verifies(commitment: G1, v: ) {
+    //
+    // }
 }
-
-
 
 fn extract_coefficients<F: PrimeField>(uni_poly: &UnivariatePoly<F>) -> Vec<F> {
     let mut coefficients = vec![F::zero(); uni_poly.co_ex.len()];
@@ -136,7 +174,6 @@ fn extract_coefficients<F: PrimeField>(uni_poly: &UnivariatePoly<F>) -> Vec<F> {
 
 // Random setup
 
-
 fn verify(commitment: G1, proof: G1, x: Fr, y: Fr, g2: G2) -> bool {
     let lhs = Bn254::pairing(commitment - proof * x, g2);
     let rhs = Bn254::pairing(proof, g2) * y;
@@ -157,6 +194,23 @@ mod tests {
         ])
     }
 
+    fn get_trusted_setup<F: PrimeField>() -> TrustedSetup {
+        let cont = &[
+            Fr::from(13),
+            Fr::from(62),
+            Fr::from(123),
+            Fr::from(952),
+            Fr::from(336),
+            Fr::from(122),
+            Fr::from(231),
+            Fr::from(1202),
+        ];
+
+        let trusted_setup = TrustedSetup::trusted_setup(3, cont);
+
+        trusted_setup
+    }
+
     #[test]
     fn test_setup() {
         let result = TrustedSetup::random_setup(2);
@@ -165,7 +219,6 @@ mod tests {
 
     #[test]
     fn test_trusted_setup() {
-
         // let rng = &mut test_rng();
         // Generate contributions (random values for now)
         // let contributions: Vec<Fr> = (0..3).map(|_| Fr::rand(rng)).collect();
@@ -223,16 +276,8 @@ mod tests {
 
     #[test]
     fn test_get_taus() {
-        let contributions = &[
-            Fr::from(13),
-            Fr::from(62),
-            Fr::from(123),
-            Fr::from(952),
-            Fr::from(336),
-            Fr::from(122),
-            Fr::from(231),
-        ];
-        let trusted_setup = TrustedSetup::trusted_setup(3, contributions);
+
+        let trusted_setup: TrustedSetup = get_trusted_setup::<Fr>();
 
         let taus = trusted_setup.get_tau_in_both_groups();
 
@@ -241,19 +286,8 @@ mod tests {
 
     #[test]
     fn test_commit() {
-        let uni_poly =  get_uni_poly();
-
-        let contributions = &[
-            Fr::from(13),
-            Fr::from(62),
-            Fr::from(123),
-            Fr::from(952),
-            Fr::from(336),
-            Fr::from(122),
-            Fr::from(1202),
-        ];
-
-        let trusted_set_up = TrustedSetup::trusted_setup(3, contributions);
+        let uni_poly = get_uni_poly();
+        let trusted_set_up = get_trusted_setup::<Fr>();
 
         let res = trusted_set_up.commit_to_polynomial(&uni_poly);
 
@@ -263,8 +297,10 @@ mod tests {
     #[test]
     fn test_open_poly() {
         let uni_poly = get_uni_poly();
-        let result = uni_poly.full_coeff_evaluation(Fr::from(4));
-        println!("Result: {:?}", result);
-        assert_eq!(result, Fr::from(68));
+        let trusted_set_up = get_trusted_setup::<Fr>();
+
+        let res = trusted_set_up.open_polynomial(uni_poly, Fr::from(4));
+
+        println!("V and Proof: {:?}", res);
     }
 }
