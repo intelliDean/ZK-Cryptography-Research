@@ -84,6 +84,7 @@ impl<F: PrimeField> Multilinear<F> for MultilinearPoly<F> {
         self.polynomial.pop().unwrap()
     }
 
+
     fn multi_partial_evaluate(&self, values: &[F]) -> Self {
         let num_vars = values.len() as u32;
         assert!(
