@@ -9,75 +9,61 @@ use ark_poly::Polynomial;
 use ark_std::test_rng;
 use polynomials::univariate::uni_poly::{Term, UnivariatePoly};
 use std::borrow::Borrow;
+use std::marker::PhantomData;
 use std::ops::Mul;
 // use ark_poly::univariate::DensePolynomial;
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
-pub struct TrustedSetup {
+pub struct TrustedSetup<F: PrimeField> {
     pub powers_of_tau: Vec<G1>,
     pub g2_tau: G2,
+    _phantom: PhantomData<F>,
 }
 
-impl TrustedSetup {
+impl<F: PrimeField + Borrow<Fp<MontBackend<FrConfig, 4>, 4>>> TrustedSetup<F> {
     fn new(powers_of_tau: Vec<G1>, g2_tau: G2) -> Self {
         Self {
             powers_of_tau,
             g2_tau,
+            _phantom: PhantomData,
         }
     }
 
-    fn trusted_setup<F: PrimeField + Borrow<Fp<MontBackend<FrConfig, 4>, 4>>>(
-        setup_size: usize,
-        contributions: &[F],
-    ) -> TrustedSetup {
-        let rng = &mut test_rng();
+    fn trusted_setup(setup_size: usize, contributions: &[F]) -> TrustedSetup<F> {
+        let g1 = G1::generator(); // Generator in G1
+        let mut g2_tau = G2::generator(); // Generator in G2
 
-        // let tau = Fr::rand(rng); // Secret scalar (not revealed)
+        let mut trusted_setup = vec![g1; setup_size];
 
-        let g1 = G1::generator(); // Generator in G1y
-        let mut g2 = G2::generator(); // Generator in G2 (for verification)
+        for each_cont in contributions {
+            let mut cont_power = F::one(); // replacing pow with `each_cont^0 = 1`
 
-        let mut trusted_setup = vec![g1.clone(); setup_size];
-        println!("G2 Before: {:?}", g2);
-
-        for (i, each_cont) in contributions.iter().enumerate() {
             for i in 1..setup_size {
-                let cont = each_cont.pow(&[i as u64]);
-                // let result: G1Projective = generator_with_scalar::<F>(trusted_setup[i], cont.into_bigint().as_ref()[0] as u32);
-                trusted_setup[i] = trusted_setup[i].mul(cont);
+                cont_power *= each_cont; //  this satisfies `each_cont^i` except 'each_cont^0'
+                trusted_setup[i] = trusted_setup[i].mul(cont_power);
+
                 if i == 1 {
-                    g2 = g2.mul(cont);
+                    g2_tau = g2_tau.mul(cont_power);
                 }
             }
-            println!("After Cont {}: {:?}", i + 1, trusted_setup);
         }
-        println!("G2 After: {:?}", g2);
 
-        TrustedSetup::new(trusted_setup, g2)
+        TrustedSetup::new(trusted_setup, g2_tau)
     }
 
     pub fn get_tau_in_both_groups(&self) -> (G1, G2) {
         (self.powers_of_tau[1], self.g2_tau)
     }
 
-    pub fn commit_to_polynomial<F: PrimeField + Borrow<Fp<MontBackend<FrConfig, 4>, 4>>>(
-        &self,
-        uni_poly: &UnivariatePoly<F>,
-    ) -> G1 {
-        let coefficients = extract_coefficients(uni_poly);
-
-        if coefficients.len() > self.powers_of_tau.len() {
-            panic!("Not enough powers of tau for the polynomial degree");
+    pub fn commit_to_polynomial(&self, uni_poly: &UnivariatePoly<F>) -> G1 {
+        let poly_degree = uni_poly.degree();
+        if poly_degree > F::from(self.powers_of_tau.len() as u32) {
+            panic!("Insufficient Powers of Tau {}", poly_degree);
         }
-        //identity element
-        let mut eval = G1::default();
 
-        //eval = ∑ (coeff[i] * powers_of_tau[i])
-        for (i, coefficient) in coefficients.iter().enumerate() {
-            let term = self.powers_of_tau[i].mul(*coefficient); // scalar multiplication
-            eval += term; // group addition
-        }
-        eval
+        let commitment = self.compute(uni_poly);
+
+        commitment
     }
 
     fn random_setup(setup_size: usize) -> (Vec<G1>, G2) {
@@ -99,48 +85,55 @@ impl TrustedSetup {
         (g1_powers, g2)
     }
 
-    pub fn open_polynomial<F: PrimeField + Borrow<Fp<MontBackend<FrConfig, 4>, 4>>>(
-        &self,
-        uni_poly: UnivariatePoly<F>,
-        eval_at: F,
-    ) -> (F, F, G1) {
+    pub fn open_polynomial(&self, uni_poly: UnivariatePoly<F>, eval_at: F) -> (F, G1) {
         let v = uni_poly.full_coeff_evaluation(eval_at);
 
-        for mut term in uni_poly.co_ex.clone() {
+        let mut numerator = uni_poly.clone();
+
+        for mut term in &mut numerator.co_ex {
             if term.exp == F::zero() {
                 term.coeff = term.coeff - v;
                 break;
             }
         }
 
+        // this gives (x - a) vibe as the root of the polynomial
         let divisor = UnivariatePoly::new(vec![
             Term::new(F::one(), F::one()),
-            Term::new(eval_at, F::zero()),
+            Term::new(eval_at.neg(), F::zero()),
         ]);
 
-        let q_x = uni_poly.divide_polynomials(divisor);
-        let mut dense = vec![F::zero(); q_x.0.co_ex.len()];
+        let q_x = numerator.divide_polynomials(divisor); // to return quotient
 
-        for q in q_x.0.co_ex.clone() {
-            dense[q.exp.into_bigint().as_ref()[0] as usize] += q.coeff;
-        }
+        let q_t = self.compute(&q_x.0);
 
-        let mut q_t = G1::default();
-
-        for i in 0..dense.len() {
-            let res = self.powers_of_tau[i].mul(dense[i]);
-            q_t += res;
-        }
-
-        println!("Result: {:?}", dense);
-        println!("Result: {:?}", q_t);
-
-        (eval_at, v, q_t)
+        (v, q_t) //f(a) and proof
     }
 
-    // pub fn verifier_verifies(commitment: G1, v: ) {
-    //
-    // }
+    pub fn verifier_verifies(&self, commitment: G1, v: F, a: F, q_tau: G1) -> bool {
+        let g1 = G1::generator();
+        let g2 = G2::generator();
+
+        let ft_v = commitment + g1.mul(v.neg()); // f(tau)  - v
+        let tau_a = self.g2_tau + g2.mul(a.neg()); // (tau - a)
+
+        let lhs = Bn254::pairing(ft_v, g2); // ((f(tau) - v), g^1)
+        let rhs = Bn254::pairing(q_tau, tau_a); // (q_tau, (tau - a))
+
+        lhs == rhs
+    }
+
+    fn compute(&self, uni_poly: &UnivariatePoly<F>) -> G1 {
+        let mut result = G1::default();
+
+        // ∑(coeff[i] * powers_of_tau[i]) no need to convert to dense
+        for term in &uni_poly.co_ex {
+            let exp = term.exp.into_bigint().as_ref()[0] as usize; // convert exponent to index
+            let term_result = self.powers_of_tau[exp].mul(term.coeff); //g^coeff
+            result += term_result;
+        }
+        result
+    }
 }
 
 fn extract_coefficients<F: PrimeField>(uni_poly: &UnivariatePoly<F>) -> Vec<F> {
@@ -151,33 +144,6 @@ fn extract_coefficients<F: PrimeField>(uni_poly: &UnivariatePoly<F>) -> Vec<F> {
     }
     println!("Coefficients: {:?}", coefficients);
     coefficients
-}
-
-// fn setup(srs_size: usize) -> (Vec<G1Projective>, G2Projective) {
-//     let rng = &mut thread_rng();
-//     let tau = Fr::rand(rng); // Secret scalar (not revealed)
-//
-//     let g1 = G1Projective::rand(rng); // Generator in G1
-//     let g2 = G2Projective::rand(rng); // Generator in G2 (for verification)
-//
-//     // Compute G1 powers: [g, g^tau, g^(tau^2), ...]
-//     let g1_powers: Vec<G1Projective> = (0..srs_size)
-//         .scan(g1, |state, _| {
-//             let next = *state;
-//             *state *= tau;
-//             Some(next)
-//         })
-//         .collect();
-//
-//     (g1_powers, g2)
-// }
-
-// Random setup
-
-fn verify(commitment: G1, proof: G1, x: Fr, y: Fr, g2: G2) -> bool {
-    let lhs = Bn254::pairing(commitment - proof * x, g2);
-    let rhs = Bn254::pairing(proof, g2) * y;
-    lhs == rhs
 }
 
 #[cfg(test)]
@@ -194,34 +160,30 @@ mod tests {
         ])
     }
 
-    fn get_trusted_setup<F: PrimeField>() -> TrustedSetup {
+    fn get_trusted_setup<F: PrimeField + Borrow<Fp<MontBackend<FrConfig, 4>, 4>>>(
+    ) -> TrustedSetup<F> {
         let cont = &[
-            Fr::from(13),
-            Fr::from(62),
-            Fr::from(123),
-            Fr::from(952),
-            Fr::from(336),
-            Fr::from(122),
-            Fr::from(231),
-            Fr::from(1202),
+            F::from(13),
+            F::from(62),
+            F::from(123),
+            F::from(952),
+            F::from(336),
+            F::from(122),
+            F::from(231),
+            F::from(1202),
         ];
 
-        let trusted_setup = TrustedSetup::trusted_setup(3, cont);
-
-        trusted_setup
+        TrustedSetup::trusted_setup(3, cont)
     }
 
     #[test]
     fn test_setup() {
-        let result = TrustedSetup::random_setup(2);
+        let result = TrustedSetup::<Fr>::random_setup(2);
         println!("{:?}", result);
     }
 
     #[test]
     fn test_trusted_setup() {
-        // let rng = &mut test_rng();
-        // Generate contributions (random values for now)
-        // let contributions: Vec<Fr> = (0..3).map(|_| Fr::rand(rng)).collect();
 
         let setup_size = 12; // number of elements in the setup
 
@@ -276,8 +238,7 @@ mod tests {
 
     #[test]
     fn test_get_taus() {
-
-        let trusted_setup: TrustedSetup = get_trusted_setup::<Fr>();
+        let trusted_setup = get_trusted_setup::<Fr>();
 
         let taus = trusted_setup.get_tau_in_both_groups();
 
@@ -302,5 +263,23 @@ mod tests {
         let res = trusted_set_up.open_polynomial(uni_poly, Fr::from(4));
 
         println!("V and Proof: {:?}", res);
+    }
+
+    #[test]
+    fn test_verify() {
+        let uni_poly = get_uni_poly();
+        let trusted_setup = get_trusted_setup::<Fr>();
+
+        let commit = trusted_setup.commit_to_polynomial(&uni_poly);
+
+        let a = Fr::from(4);
+
+        let (v, qt) = trusted_setup.open_polynomial(uni_poly, a);
+
+        let verify = trusted_setup.verifier_verifies(commit, v, a, qt);
+
+        assert_eq!(verify, true);
+
+        println!("Verify: {:?}", verify);
     }
 }
