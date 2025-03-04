@@ -1,8 +1,5 @@
-use ark_bn254::{Bn254, Config, Fr, FrConfig, G1Projective as G1, G2Projective as G2};
-// Use BLS12-381 if you want
-use ark_ec::bls12::G1Projective;
+use ark_bn254::{Bn254, Fr, FrConfig, G1Projective as G1, G2Projective as G2};
 use ark_ec::pairing::Pairing;
-use ark_ec::twisted_edwards::Projective;
 use ark_ec::{PrimeGroup, VariableBaseMSM};
 use ark_ff::{Field, Fp, MontBackend, PrimeField, UniformRand};
 use ark_poly::Polynomial;
@@ -21,7 +18,7 @@ pub struct TrustedSetup<F: PrimeField> {
 }
 
 impl<F: PrimeField + Borrow<Fp<MontBackend<FrConfig, 4>, 4>>> TrustedSetup<F> {
-    fn new(powers_of_tau: Vec<G1>, g2_tau: G2) -> Self {
+    pub(crate) fn new(powers_of_tau: Vec<G1>, g2_tau: G2) -> Self {
         Self {
             powers_of_tau,
             g2_tau,
@@ -29,7 +26,50 @@ impl<F: PrimeField + Borrow<Fp<MontBackend<FrConfig, 4>, 4>>> TrustedSetup<F> {
         }
     }
 
-    fn trusted_setup(setup_size: usize, contributions: &[F]) -> TrustedSetup<F> {
+  
+    fn initiate_univariate_trusted_setup(setup_size: usize, init_tau: F) -> TrustedSetup<F> {
+        let g1 = G1::generator(); // Generator in G1
+        let mut g2_tau = G2::generator(); // Generator in G2
+
+        let mut trusted_setup = vec![g1; setup_size];
+
+        // for each_cont in init_tau {
+            let mut cont_power = F::one(); // replacing pow with `each_cont^0 = 1`
+
+            for i in 1..setup_size {
+                cont_power *= init_tau; //  this satisfies `each_cont^i` except 'each_cont^0'
+                trusted_setup[i] = trusted_setup[i].mul(cont_power);
+                println!("{:?}", trusted_setup);
+
+                if i == 1 {
+                    g2_tau = g2_tau.mul(cont_power);
+                }
+            }
+        // }
+
+        TrustedSetup::new(trusted_setup, g2_tau)
+    }
+
+    fn contribute_to_setup(&mut self, tau: F) -> Self {
+
+        let powers_of_tau = self.powers_of_tau.clone();
+        let mut cont_power = F::one();
+
+        for i in 1..powers_of_tau.len() {
+            cont_power *= tau;
+
+            self.powers_of_tau[i] = powers_of_tau[i].mul(cont_power);
+
+            if i == 1 {
+                self.g2_tau = self.g2_tau.mul(cont_power);
+            }
+        }
+
+        self.clone()
+    }
+
+    // with this, it
+    fn univariate_trusted_setup(setup_size: usize, contributions: &[F]) -> TrustedSetup<F> {
         let g1 = G1::generator(); // Generator in G1
         let mut g2_tau = G2::generator(); // Generator in G2
 
@@ -41,7 +81,7 @@ impl<F: PrimeField + Borrow<Fp<MontBackend<FrConfig, 4>, 4>>> TrustedSetup<F> {
             for i in 1..setup_size {
                 cont_power *= each_cont; //  this satisfies `each_cont^i` except 'each_cont^0'
                 trusted_setup[i] = trusted_setup[i].mul(cont_power);
-
+                println!("{:?}", trusted_setup);
                 if i == 1 {
                     g2_tau = g2_tau.mul(cont_power);
                 }
@@ -107,7 +147,7 @@ impl<F: PrimeField + Borrow<Fp<MontBackend<FrConfig, 4>, 4>>> TrustedSetup<F> {
 
         let q_t = self.compute(&q_x.0);
 
-        (v, q_t) //f(a) and proof
+        (v, q_t) //(f(a), proof)
     }
 
     pub fn verifier_verifies(&self, commitment: G1, v: F, a: F, q_tau: G1) -> bool {
@@ -117,6 +157,7 @@ impl<F: PrimeField + Borrow<Fp<MontBackend<FrConfig, 4>, 4>>> TrustedSetup<F> {
         let ft_v = commitment + g1.mul(v.neg()); // f(tau)  - v
         let tau_a = self.g2_tau + g2.mul(a.neg()); // (tau - a)
 
+        //using bilinear pairing G1 x G2 = GT
         let lhs = Bn254::pairing(ft_v, g2); // ((f(tau) - v), g^1)
         let rhs = Bn254::pairing(q_tau, tau_a); // (q_tau, (tau - a))
 
@@ -162,18 +203,8 @@ mod tests {
 
     fn get_trusted_setup<F: PrimeField + Borrow<Fp<MontBackend<FrConfig, 4>, 4>>>(
     ) -> TrustedSetup<F> {
-        let cont = &[
-            F::from(13),
-            F::from(62),
-            F::from(123),
-            F::from(952),
-            F::from(336),
-            F::from(122),
-            F::from(231),
-            F::from(1202),
-        ];
-
-        TrustedSetup::trusted_setup(3, cont)
+        let tau = F::from(5);
+        TrustedSetup::initiate_univariate_trusted_setup(3, tau)
     }
 
     #[test]
@@ -188,7 +219,7 @@ mod tests {
         let setup_size = 12; // number of elements in the setup
 
         let contributions = &[
-            Fr::from(13),
+            Fr::from(5),
             Fr::from(62),
             Fr::from(123),
             Fr::from(952),
@@ -198,7 +229,7 @@ mod tests {
             Fr::from(1202),
         ];
         // Run the trusted setup function
-        let result = TrustedSetup::trusted_setup(setup_size, contributions);
+        let result = TrustedSetup::univariate_trusted_setup(setup_size, contributions);
         println!("Everything: {:?}", result);
 
         // Check that the result has the correct size
@@ -223,6 +254,51 @@ mod tests {
                 "No element should be the identity (zero point)"
             );
         }
+    }
+
+    #[test]
+    fn test_initiate_trusted_setup() {
+
+        let setup_size = 3; // number of elements in the setup
+
+        let tau = Fr::from(5);
+        // Run the trusted setup function
+        let result = TrustedSetup::initiate_univariate_trusted_setup(setup_size, tau);
+        println!("Trusted Setup: {:?}", result);
+
+        // Check that the result has the correct size
+        assert_eq!(
+            result.powers_of_tau.len(),
+            setup_size,
+            "Output vector should have the same size as setup_size"
+        );
+
+        // Ensure values are not just the initial generator (i.e., contributions applied)
+        let g1 = G1::default();
+        assert!(
+            result.powers_of_tau.iter().any(|&x| x != g1),
+            "At least one element should be different from the initial generator"
+        );
+
+        // Additional sanity checks (optional)
+        for i in 0..setup_size {
+            assert_ne!(
+                result.powers_of_tau[i],
+                G1::default(),
+                "No element should be the identity (zero point)"
+            );
+        }
+    }
+
+    #[test]
+    fn test_contribute_to_trusted_setup() {
+        let contributed_tau = Fr::from(1029);
+
+        let mut trusted_setup = get_trusted_setup();
+
+        let res = trusted_setup.contribute_to_setup(contributed_tau);
+
+        println!("Contributed: {:?}", res);
     }
 
     #[test]
@@ -268,7 +344,13 @@ mod tests {
     #[test]
     fn test_verify() {
         let uni_poly = get_uni_poly();
-        let trusted_setup = get_trusted_setup::<Fr>();
+        let mut  trusted_setup = get_trusted_setup::<Fr>();
+
+        let contributed = trusted_setup.contribute_to_setup(Fr::from(820));
+        let contributed = trusted_setup.contribute_to_setup(Fr::from(83420));
+        let contributed = trusted_setup.contribute_to_setup(Fr::from(5650));
+        let contributed = trusted_setup.contribute_to_setup(Fr::from(2343));
+        let contributed = trusted_setup.contribute_to_setup(Fr::from(353));
 
         let commit = trusted_setup.commit_to_polynomial(&uni_poly);
 
