@@ -38,8 +38,6 @@ impl<F: PrimeField + Borrow<Fp<MontBackend<FrConfig, 4>, 4>>> TrustedSetup<F> {
         let mut g1_evals = Vec::with_capacity(bhc.len());
         let g2_evals: Vec<G2> = tau_var.iter().map(|&tau| g2.mul(tau)).collect();
 
-
-
         for combinations in bhc {
             let mut res = F::one();
 
@@ -54,17 +52,17 @@ impl<F: PrimeField + Borrow<Fp<MontBackend<FrConfig, 4>, 4>>> TrustedSetup<F> {
             g1_evals.push(g1.mul(res));
         }
 
-
         println!("G1: {:?}", g1_evals);
         println!("G2: {:?}", g2_evals);
         TrustedSetup::new(g1_evals, g2_evals)
     }
-
 }
 
 fn generate_hypercube(n: usize) -> Vec<Vec<bool>> {
     assert!(
-        n > 1 && n.is_power_of_two(), "Required power of 2 but got {}", n
+        n > 1 && n.is_power_of_two(),
+        "Required power of 2 but got {}",
+        n
     );
 
     let bits = n.trailing_zeros() as usize; //log₂(n)
@@ -82,7 +80,13 @@ mod tests {
     #[test]
     fn test_generate_hypercube() {
         let result = generate_hypercube(4);
-        println!("{:?}", result);
+        let expected = vec![
+            vec![false, false], // 00
+            vec![false, true], //  01
+            vec![true, false], //  10
+            vec![true, true], //   11
+        ];
+        assert_eq!(result, expected);
     }
 
     #[test]
@@ -98,7 +102,7 @@ mod tests {
                 Fr::from(8),
                 Fr::from(9),
             ]),
-            &[Fr::from(2), Fr::from(6),Fr::from(6)],
+            &[Fr::from(2), Fr::from(6), Fr::from(6)],
         );
     }
 }

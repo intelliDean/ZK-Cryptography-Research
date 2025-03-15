@@ -140,7 +140,6 @@ impl<F: PrimeField> Points<F> {
         UnivariatePoly::new(polynomial)
     }
 
-    // Adds a term to the polynomial, combining like terms if necessary
     fn add_term1(polynomial: &mut Vec<Term<F>>, term: Term<F>) {
         if term.coeff.is_zero() {
             return; // Skip zero terms

@@ -69,6 +69,24 @@ impl<F: PrimeField> UnivariatePoly<F> {
         Points { points } // Return Points with the collected Vec
     }
 
+    pub fn to_dense(&self) -> Vec<F> {
+
+        if self.co_ex.is_empty() {
+            return Vec::new();
+        }
+
+        let degree = self.degree.into_bigint().as_ref()[0] as usize;
+        let mut dense = vec![F::zero(); degree + 1];
+
+        for term in self.co_ex.iter() {
+            let idx = term.exp.into_bigint().as_ref()[0] as usize;
+            assert!(idx <= degree, "Exponent exceeds polynomial degree");
+            dense[idx] = term.coeff
+        }
+
+        dense
+    }
+
     pub fn divide_polynomials(
         self,
         divisor: UnivariatePoly<F>,
@@ -195,6 +213,27 @@ mod tests {
         ]);
         assert_eq!(result, points);
         // println!("{:?}", result);
+    }
+
+    #[test]
+    fn test_to_dense() {
+        let uni_poly = UnivariatePoly::new(vec![
+            Term::new(Fr::from(2), Fr::from(2)),   // 2x^2
+            Term::new(Fr::from(-18), Fr::from(0)), // -18
+            Term::new(Fr::from(3), Fr::from(1)),   // 3x
+            Term::new(Fr::from(3), Fr::from(5)),   // 3x^4
+        ]);
+
+        let dense = uni_poly.to_dense();
+        let expected_dense = vec![
+            Fr::from(-18),
+            Fr::from(3),
+            Fr::from(2),
+            Fr::from(0),
+            Fr::from(0),
+            Fr::from(3),
+        ];
+        assert_eq!(dense, expected_dense);
     }
 
     #[test]

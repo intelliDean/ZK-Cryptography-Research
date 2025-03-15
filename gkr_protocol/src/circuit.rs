@@ -21,7 +21,7 @@ impl<F: PrimeField> Circuit<F> {
     }
 
     pub fn run_circuit(&mut self, inputs: MultilinearPoly<F>) -> Vec<MultilinearPoly<F>> {
-        // Initialize the witness layer with the inputs
+        // initialize the witness layer with the inputs
         self.layer_witness.push(inputs);
 
         let mut circuit = self.layers.clone();
