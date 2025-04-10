@@ -76,6 +76,13 @@ impl<F: PrimeField + Borrow<Fp<MontBackend<FrConfig, 4>, 4>>> TrustedSetup<F> {
         TrustedSetup::new(g1_evals, g2_evals)
     }
 
+
+
+
+
+
+
+
     pub fn commit_to_polynomial (&self, multilinear: &MultilinearPoly<F>) -> G1 {
         assert!(self.powers_of_tau.len().is_power_of_two());
         assert_eq!(
@@ -143,16 +150,21 @@ impl<F: PrimeField + Borrow<Fp<MontBackend<FrConfig, 4>, 4>>> TrustedSetup<F> {
         for (i, a) in all_a.iter().enumerate() {
             let tau_a = self.g2_tau[i] + g2.mul(a.neg()); // (tau - a)
 
-           let res = Bn254::pairing(proof.quotients[i], tau_a);
+            let res = Bn254::pairing(proof.quotients[i], tau_a);
 
-           rhs += res;
+            rhs += res;
         }
 
-       //  //using bilinear pairing G1 x G2 = GT
+        //  //using bilinear pairing G1 x G2 = GT
         let lhs = Bn254::pairing(ft_v, g2); // ((f(tau) - v), g^1)
 
         lhs == rhs
     }
+}
+
+fn prover_proves_pcs<F: PrimeField> (
+    trusted_setup: TrustedSetup<F>, multilinear: MultilinearPoly<F>) {
+
 }
 
 fn get_quotient<F: PrimeField>(f_1: &Vec<F>, f_0: &Vec<F>) -> MultilinearPoly<F> {
@@ -220,15 +232,15 @@ mod tests {
     fn get_poly() -> MultilinearPoly<Fr> {
 
         MultilinearPoly::new(vec![
-                Fr::from(3),
-                Fr::from(2),
-                Fr::from(2),
-                Fr::from(2),
-                Fr::from(4),
-                Fr::from(5),
-                Fr::from(8),
-                Fr::from(9),
-            ])
+            Fr::from(3),
+            Fr::from(2),
+            Fr::from(2),
+            Fr::from(2),
+            Fr::from(4),
+            Fr::from(5),
+            Fr::from(8),
+            Fr::from(9),
+        ])
     }
 
 
@@ -360,7 +372,7 @@ mod tests {
         //Prover commits to the polynomial and sends the commitment to the verifier
         let commitment = trusted_setup.commit_to_polynomial(&poly);
 
-     //The verifier having received the commitment, sends 'a' to the prover to open the poly at 'a'
+        //The verifier having received the commitment, sends 'a' to the prover to open the poly at 'a'
         let a = &[Fr::from(6), Fr::from(4), Fr::from(0)];
 
         //the prover opens the polynomial at 'a' and sends the proof (v, quotients) to the verifier

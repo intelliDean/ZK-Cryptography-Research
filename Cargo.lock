@@ -658,6 +658,8 @@ dependencies = [
  "ark-poly-commit",
  "ark-std",
  "polynomials",
+ "sha3",
+ "sumcheck_protocol",
 ]
 
 [[package]]
