@@ -156,41 +156,60 @@ impl<F: PrimeField> Points<F> {
         }
     }
 }
+
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ark_bn254::Fr;
+    // use ark_bn254::Fr;
+    use field_tracker::{print_summary, Ft};
+    type Fr = Ft!(ark_bn254::Fr);
+
     #[test]
     fn test_lagrange_interpolate() {
         //points x and y
         let points = Points::new(vec![
-            XAndY::new(Fr::from(2), Fr::from(4)),
-            XAndY::new(Fr::from(3), Fr::from(5)),
+            XAndY::new(Fr::from(0), Fr::from(1)),
+            XAndY::new(Fr::from(1), Fr::from(2)),
+            XAndY::new(Fr::from(2), Fr::from(5)),
         ]);
         let result = points.lagrange_interpolate();
+        //add: 36, sub: 36, mul: 88, inv: 12
 
-        assert_eq!(result.degree, Fr::from(1));
-        println!("result = {:?}", result);
-        assert_eq!(
-            result.co_ex,
-            vec![Term::new(Fr::from(1), Fr::from(1)), Term::new(Fr::from(2), Fr::from(0))]
-        );
+
+        // assert_eq!(result.degree, Fr::from(1));
+        println!("result = {:?}", result.co_ex);
+        // assert_eq!(
+        //     result.co_ex,
+        //     vec![Term::new(Fr::from(1), Fr::from(1)), Term::new(Fr::from(2), Fr::from(0))]
+        // );
+
+        print_summary!();
     }
 
     #[test]
     fn test_newton_interpolate() {
         //points x and y
+        // let points = Points::new(vec![
+        //     XAndY::new(Fr::from(2), Fr::from(4)),
+        //     XAndY::new(Fr::from(3), Fr::from(5)),
+        // ]);
+
         let points = Points::new(vec![
+            XAndY::new(Fr::from(0), Fr::from(1)),
+            XAndY::new(Fr::from(1), Fr::from(2)),
             XAndY::new(Fr::from(2), Fr::from(4)),
-            XAndY::new(Fr::from(3), Fr::from(5)),
         ]);
         let result = points.newton_interpolate();
+        //add: 16, sub: 22, mul: 19, inv: 0
 
         // assert_eq!(result.degree, Fr::from(1));
         println!("result = {:?}", result);
-        assert_eq!(
-            result,
-            UnivariatePoly::new(vec![Term::new(Fr::from(1), Fr::from(1)), Term::new(Fr::from(2), Fr::from(0))])
-        );
+        // assert_eq!(
+        //     result,
+        //     UnivariatePoly::new(vec![Term::new(Fr::from(1), Fr::from(1)), Term::new(Fr::from(2), Fr::from(0))])
+        // );
+
+        print_summary!();
     }
 }

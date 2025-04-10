@@ -8,6 +8,8 @@ use sumcheck_protocol::gkr_sumcheck::verify as sub_verify;
 use sumcheck_protocol::transcript::{to_bytes, HashTrait, Transcript};
 
 
+
+// GRK PROTOCOL VERIFIER
 pub fn verify<F: PrimeField>(proof: GKRProof<F>, mut circuit: Circuit<F>, inputs: &[F]) -> bool {
     let mut transcript = Transcript::<Keccak256, F>::init(Keccak256::new());
     let mut state = VerifierState::new();
@@ -19,6 +21,8 @@ pub fn verify<F: PrimeField>(proof: GKRProof<F>, mut circuit: Circuit<F>, inputs
     transcript.absorb(&to_bytes(&[state.current_claim]));
 
     let num_layers = circuit.layers.len();
+
+    let mut verifier_result = false;
 
     // verify each layer
     for i in 0..num_layers {
@@ -32,7 +36,7 @@ pub fn verify<F: PrimeField>(proof: GKRProof<F>, mut circuit: Circuit<F>, inputs
             return false;
         }
 
-        if !state.update(
+         verifier_result = state.update(
             &proof,
             &mut circuit,
             inputs,
@@ -41,11 +45,13 @@ pub fn verify<F: PrimeField>(proof: GKRProof<F>, mut circuit: Circuit<F>, inputs
             init_challenge,
             sum_check_verify.last_claimed_sum,
             &mut transcript,
-        ) {
+        );
+
+        if !verifier_result {
             return false;
         }
     }
-    true
+    verifier_result
 }
 
 
@@ -174,10 +180,18 @@ mod test {
     use crate::gate::{Gate, Ops};
     use crate::gkr_prover::prove;
     use crate::layer::Layer;
-    use ark_bn254::{Fq, Fr};
+    // use ark_bn254::{Fq, Fr};
+    use ark_std::{test_rng, UniformRand};
+    use ark_std::rand::Rng;
     use polynomials::multilinear::multilinear::{Multilinear, MultilinearPoly};
 
-    fn get_circuit() -> Circuit<Fr> {
+
+    use field_tracker::{print_summary, Ft};
+    use polynomials::multilinear::multilinear::to_field;
+
+    type Fq = Ft!(ark_bn254::Fr);
+
+    fn get_circuit() -> Circuit<Fq> {
         let layer0 = Layer::new(vec![Gate::new(0, 0, 1, Ops::MUL)]);
 
         let layer1 = Layer::new(vec![Gate::new(0, 0, 1, Ops::MUL), Gate::new(1, 2, 3, Ops::ADD)]);
@@ -196,7 +210,75 @@ mod test {
 
         Circuit::new(circuit)
     }
-    fn get_circuit1() -> Circuit<Fr> {
+
+    // fn get_big_inputs() -> Vec<Fq> {
+    //     let size = 1 << 3; // 1,048,576 elements
+    //     let mut rng = test_rng();
+    //
+    //     let poly: Vec<Fq> = (0..size)
+    //         .map(|_| Fq::from(rng.gen_range(1..20)))
+    //         .collect();
+    //
+    //     poly
+    // }
+
+    fn get_big_inputs(size: usize) -> Vec<Fq> {
+        let size = 1 << size;
+        let mut rng = test_rng();
+
+        let poly: Vec<Fq> = (0..size)
+            .map(|_| {
+                let random_val = rng.gen_range(1..20);
+                Fq::from(random_val)
+            })
+            .collect();
+
+        poly
+    }
+
+    fn get_big_circuit(size: usize) -> Circuit<Fq> {
+        let num_layers = size;
+
+
+        let input_size = 1 << num_layers;  // 2^20 = 1,048,576
+        let mut layers = Vec::new();
+
+        // Number of layers - using log2(input_size) for depth
+        // let num_layers = 4;  // log2(2^20) = 20
+
+        let mut current_size = input_size;
+        let mut next_wire = input_size;  // Start wire indices after inputs
+
+        for layer_idx in 0..num_layers {
+            let mut gates = Vec::new();
+            let gates_per_layer = current_size / 2;  // Halve the size each layer
+
+            for i in 0..gates_per_layer {
+                let left = i * 2;
+                let right = left + 1;
+                let output =  i;
+
+                // Alternate between ADD and MUL operations
+                let op = if (layer_idx + i) % 2 == 0 { Ops::ADD } else { Ops::MUL };
+                gates.push(Gate::new(output, left, right, op));
+            }
+
+            layers.push(Layer::new(gates));
+            next_wire += gates_per_layer;
+            current_size = gates_per_layer;
+        }
+        layers.reverse();
+
+        let circuit = Circuit::new(layers);
+
+        // Optional: Print circuit stats
+        // println!("Number of layers: {}", circuit.layers.len());
+        // println!("Input size: {}", input_size);
+        // println!("Total gates: {}", circuit.layers.iter().map(|l| l.gates.len()).sum::<usize>());
+
+        circuit
+    }
+    fn get_circuit1() -> Circuit<Fq> {
         let layer0 = Layer::new(vec![Gate::new(0, 0, 1, Ops::MUL)]);
 
         let layer1 = Layer::new(vec![Gate::new(0, 0, 1, Ops::MUL), Gate::new(1, 2, 3, Ops::ADD)]);
@@ -216,17 +298,25 @@ mod test {
         Circuit::new(circuit)
     }
 
-    fn get_input() -> MultilinearPoly<Fr> {
+    fn get_input() -> MultilinearPoly<Fq> {
         MultilinearPoly::new(vec![
-            Fr::from(1),
-            Fr::from(2),
-            Fr::from(3),
-            Fr::from(4),
-            Fr::from(5),
-            Fr::from(6),
-            Fr::from(7),
-            Fr::from(8),
+            Fq::from(1),
+            Fq::from(2),
+            Fq::from(3),
+            Fq::from(4),
+            Fq::from(5),
+            Fq::from(6),
+            Fq::from(7),
+            Fq::from(8),
         ])
+    }
+
+    #[test]
+    fn t() {
+        // println!("{:?}", get_big_inputs());
+
+        dbg!(get_big_circuit(3));
+        dbg!(get_big_inputs(3));
     }
 
     #[test]
@@ -294,14 +384,14 @@ mod test {
 
         let mut circuit = get_circuit();
         let input = [
-            Fr::from(1),
-            Fr::from(2),
-            Fr::from(3),
-            Fr::from(4),
-            Fr::from(5),
-            Fr::from(6),
-            Fr::from(7),
-            Fr::from(8),
+            Fq::from(1),
+            Fq::from(2),
+            Fq::from(3),
+            Fq::from(4),
+            Fq::from(5),
+            Fq::from(6),
+            Fq::from(7),
+            Fq::from(8),
         ];
 
         let proof = prove(&mut circuit, &input.clone());
@@ -309,19 +399,41 @@ mod test {
         // println!("Result: {:?}", proof);
 
         let input1 = [
-            Fr::from(1),
-            Fr::from(2),
-            Fr::from(2),
-            Fr::from(4),
-            Fr::from(5),
-            Fr::from(6),
-            Fr::from(7),
-            Fr::from(8),
+            Fq::from(1),
+            Fq::from(2),
+            Fq::from(2),
+            Fq::from(4),
+            Fq::from(5),
+            Fq::from(6),
+            Fq::from(7),
+            Fq::from(8),
         ];
 
         let verified = verify(proof, circuit, &input);
         println!("Verified: {:?}", verified);
         assert_eq!(verified, true);
+
+        print_summary!();
+    }
+
+    #[test]
+    fn test_gkr_protocol_large_input() {
+
+        let size = 5;
+        let mut circuit = get_big_circuit(size);
+        let input = get_big_inputs(size);
+
+        let proof = prove(&mut circuit, &input.clone());
+
+        println!("Result: {:?}", proof);
+
+        let verified = verify(proof, circuit, &input);
+        println!("Verified: {:?}", verified);
+        assert_eq!(verified, true);
+
+        print_summary!();
+
+
     }
 }
 

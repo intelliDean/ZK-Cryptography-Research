@@ -67,8 +67,13 @@ pub(crate) fn convert_to_bytes<F: PrimeField>(field_elements: &Vec<F>) -> Vec<u8
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ark_bn254::Fr;
+    // use ark_bn254::Fr;
     use polynomials::multilinear::multilinear::to_field;
+
+
+    use field_tracker::{print_summary, Ft};
+
+    type Fr = Ft!(ark_bn254::Fr);
 
     #[test]
     fn test_prover_proves_claim() {
@@ -78,5 +83,7 @@ mod tests {
         let proof = prover_proves_claim(poly.clone());
         assert_eq!(proof.claimed_sum, Fr::from(10));
         assert_eq!(proof.uni_polys.len(), 3);
+
+        print_summary!();
     }
 }

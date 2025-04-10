@@ -9,6 +9,7 @@ use sha3::{Digest, Keccak256};
 use sumcheck_protocol::gkr_sumcheck::prove as sub_prove;
 use sumcheck_protocol::transcript::{to_bytes, Transcript};
 
+// GKR PROTOCOL PROVER
 #[derive(Debug, Clone, PartialEq)]
 pub struct GKRProof<F: PrimeField> {
     pub(crate) output_poly: MultilinearPoly<F>,
@@ -29,7 +30,6 @@ pub fn prove<F: PrimeField>(circuit: &mut Circuit<F>, inputs: &[F]) -> GKRProof<
         w_0.push(F::zero()); // add 0 to make it a valid evaluation multilinear
     }
     let output_poly = MultilinearPoly::new(w_0);
-    //=====
 
     transcript.absorb(&to_bytes(&output_poly.polynomial));
 
@@ -37,7 +37,6 @@ pub fn prove<F: PrimeField>(circuit: &mut Circuit<F>, inputs: &[F]) -> GKRProof<
     let m_0 = output_poly.clone().full_evaluation(vec![random_challenge]);
 
     transcript.absorb(&to_bytes(&[m_0]));
-    //===
 
     let num_layers = circuit.layers.len();
 

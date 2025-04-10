@@ -26,12 +26,13 @@ impl<F: PrimeField> Circuit<F> {
 
         let mut circuit = self.layers.clone();
         circuit.reverse();
-        println!("Layers to evaluate: {:?}", circuit);
+        
         self.compute(&mut circuit); // Compute all layers
 
         self.layer_witness.reverse();
         self.layer_witness.clone() // Return all computed layer evaluations
     }
+
     //This returns a layer w_i by evaluating the circuit up to the layer index
     pub fn partial_circuit_run(
         &mut self,
@@ -41,11 +42,11 @@ impl<F: PrimeField> Circuit<F> {
         let length = self.layers.len();
         println!("Circuit length: {}", length);
         match layer_id {
-            // If layer_id == self.circuit.layers.len(),
+            // if layer_id == self.circuit.layers.len(),
             // return inputs directly, no need to compute
             _ if layer_id == length => inputs,
 
-            // If layer_id is out of bounds,
+            // if layer_id is out of bounds,
             // return empty vector
             _ if layer_id > length => MultilinearPoly::new(vec![]),
 
@@ -55,7 +56,7 @@ impl<F: PrimeField> Circuit<F> {
                 self.layer_witness.push(inputs);
                 let idx = length - 1 - layer_id;
 
-                // Convert to Vec to avoid borrowing `self`
+                // convert to Vec to avoid borrowing `self`
                 let mut layers = self.layers[..=idx].to_vec();
 
                 self.compute(&mut layers); // this will compute up to the layer_id
@@ -70,10 +71,10 @@ impl<F: PrimeField> Circuit<F> {
             // this will make use of the last layer
             // which was last pushed into the vec as the current layer
             if let Some(current_layer) = self.layer_witness.last() {
-                // let mut witness = Vec::with_capacity(layer.len()); // Allocate space for new layer
+                
                 let mut witness = vec![F::from(0); layer.gates.len()];
 
-                for mut gate in &layer.gates {
+                for gate in &layer.gates {
                     let left_value = &current_layer.polynomial[gate.left];
                     let right_value = &current_layer.polynomial[gate.right];
 
@@ -83,7 +84,7 @@ impl<F: PrimeField> Circuit<F> {
                     witness[gate.output] += result;
                 }
 
-                // Optionally print witness
+                // optionally
                 if cfg!(debug_assertions) {
                     println!("witness: {:?}", witness);
                 }
@@ -92,7 +93,7 @@ impl<F: PrimeField> Circuit<F> {
             }
         }
     }
-    //This returns a layer w_i when the circuit are already evaluated
+    //this returns a layer w_i when the circuit are already evaluated
     pub fn w_i_polynomial(&self, layer_index: usize) -> MultilinearPoly<F> {
 
         if layer_index >= self.clone().layer_witness.len() {

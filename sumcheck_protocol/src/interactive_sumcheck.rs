@@ -2,6 +2,7 @@ use crate::prover_sumcheck::Proof;
 use ark_bn254::Fr;
 use ark_ff::PrimeField;
 use ark_std::iterable::Iterable;
+use field_tracker::{end_tscope, start_tscope};
 use rand::Rng;
 use polynomials::multilinear::multilinear::{Multilinear, MultilinearPoly};
 
@@ -157,6 +158,8 @@ fn interactive_sumcheck_protocol<F: PrimeField>(
     let mut rand_chal = Vec::with_capacity(seq as usize - 1); // Pre-allocate space
 
     for _ in 1..seq {
+        start_tscope!("sumcheck round "); // benchmarking
+
         let (random_challenge, eval_at_challenge) = verifier_verifies_claim(&uni_poly, claimed_sum);
         rand_chal.push(random_challenge);
 
@@ -165,6 +168,8 @@ fn interactive_sumcheck_protocol<F: PrimeField>(
         poly = next_prover_poly;
 
         claimed_sum = eval_at_challenge.polynomial[0];
+
+        end_tscope!();
     }
 
     (uni_poly, claimed_sum, Multilinear::new(rand_chal))
@@ -172,23 +177,45 @@ fn interactive_sumcheck_protocol<F: PrimeField>(
 
 #[cfg(test)]
 mod tests {
+    use ark_ff::Zero;
+    use ark_std::{test_rng, UniformRand};
     use super::*;
-    use ark_bn254::Fr;
+    use ark_std::rand::Rng;
+
+    use field_tracker::{print_summary, Ft};
     use polynomials::multilinear::multilinear::to_field;
+
+    type Fr = Ft!(ark_bn254::Fr);
 
     fn get_polynomial() -> MultilinearPoly<Fr> {
         MultilinearPoly::new(to_field(vec![0, 0, 0, 3, 0, 0, 2, 5]))
     }
 
+    fn get_big_poly() -> MultilinearPoly<Fr> {
+        let size = 1 << 20; // 1,048,576 elements
+        let mut rng = test_rng();
+
+        let poly: Vec<Fr> = (0..size)
+            .map(|_| Fr::from(rng.gen_range(0..20)))
+            .collect();
+
+        MultilinearPoly::new(poly)
+    }
+
+    #[test]
+    fn t() {
+        dbg!(get_big_poly());
+    }
     #[test]
     fn test_interactive_sumcheck() {
-        let poly = get_polynomial();
-        let mut result = interactive_sumcheck_protocol(poly);
+        // let poly = get_polynomial();
+        let poly = get_big_poly();
+        let mut result = interactive_sumcheck_protocol(poly.clone());
 
-        let v_poly = get_polynomial();
+        let res = oracle_check(&poly, &result.0, result.1, &mut result.2);
+        assert_eq!(res, true);
 
-        let res = oracle_check(&v_poly, &result.0, result.1, &mut result.2);
-        assert_eq!(res, true)
+        print_summary!();
     }
     #[test]
     fn interactive_sumcheck_to_return_false() {

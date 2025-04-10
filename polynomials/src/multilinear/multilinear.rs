@@ -3,6 +3,35 @@ use ark_ff::{BigInteger, PrimeField};
 use num_traits::{NumCast, ToPrimitive};
 
 #[derive(Debug, Clone, PartialEq)]
+pub enum Ops {
+    ADD,
+    MUL,
+}
+
+impl Ops {
+    pub fn operation<F: PrimeField>(&self, left: &F, right: &F) -> F {
+        match self {
+            Ops::ADD => *left + *right,
+            Ops::MUL => *left * *right,
+        }
+    }
+
+    pub fn cartesian_operations<F: PrimeField>(self, poly_a: &[F], poly_b: &[F]) -> MultilinearPoly<F> {
+        let new_eval: Vec<F> = poly_a
+            .iter()
+            .flat_map(|a| {
+                poly_b.iter().map({
+                    let op = self.clone();
+                    move |b| op.operation(a, b)
+                })
+            })
+            .collect();
+
+        MultilinearPoly::new(new_eval)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct MultilinearPoly<F: PrimeField> {
     pub polynomial: Vec<F>,
 }
@@ -15,6 +44,7 @@ pub trait Multilinear<F: PrimeField> {
     fn multiply_by(&self, value: F) -> Self;
     fn convert_to_bytes(&self) -> Vec<u8>;
     fn tensor_add(self, other: MultilinearPoly<F>) -> MultilinearPoly<F>;
+    fn tensor_operation(self, other: MultilinearPoly<F>, ops: Ops) -> MultilinearPoly<F>;
     fn tensor_multiply(self, other: MultilinearPoly<F>) -> MultilinearPoly<F>;
     fn element_sum(self, other: MultilinearPoly<F>) -> MultilinearPoly<F>;
     fn num_var(&self) -> u32;
@@ -125,6 +155,20 @@ impl<F: PrimeField> Multilinear<F> for MultilinearPoly<F> {
 
     // adding each element in the polynomial to each element in the other polynomial
     fn tensor_add(self, other: MultilinearPoly<F>) -> MultilinearPoly<F> {
+        let new_poly: Vec<F> = self
+            .polynomial
+            .into_iter()
+            .flat_map(|var| {
+                other
+                    .polynomial
+                    .iter()
+                    .map(move |&other_var| var + other_var)
+            })
+            .collect();
+
+        MultilinearPoly::new(new_poly)
+    }
+    fn tensor_operation(self, other: MultilinearPoly<F>, ops: Ops) -> MultilinearPoly<F> {
         let new_poly: Vec<F> = self
             .polynomial
             .into_iter()

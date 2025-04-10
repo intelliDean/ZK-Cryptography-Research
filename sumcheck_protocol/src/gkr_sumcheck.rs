@@ -5,12 +5,6 @@ use polynomials::univariate::uni_point::{Points, XAndY};
 use polynomials::univariate::uni_poly::{Term, UnivariatePoly};
 use polynomials::product::product_poly::ProductPoly;
 
-#[derive(Clone, Debug)]
-pub struct GKRSumcheckProverProof<F: PrimeField> {
-    pub claimed_sum: F,
-    pub round_univariate_polynomials: Vec<UnivariatePoly<F>>,
-    pub random_challenges: Vec<F>
-}
 
 #[derive(Clone, Debug)]
 pub struct GKRSumcheckVerifierProof<F: PrimeField> {
@@ -24,6 +18,15 @@ pub struct GKRVerifierProof<F: PrimeField> {
     pub round_univariate_polynomials: Vec<UnivariatePoly<F>>,
     pub claimed_sum: F
 }
+
+// GRK SUMCHECK PROVER
+#[derive(Clone, Debug)]
+pub struct GKRSumcheckProverProof<F: PrimeField> {
+    pub claimed_sum: F,
+    pub round_univariate_polynomials: Vec<UnivariatePoly<F>>,
+    pub random_challenges: Vec<F>
+}
+
 
 pub fn prove<K: HashTrait, F: PrimeField>(
     sum_polynomial: SumPoly<F>,
@@ -51,11 +54,6 @@ pub fn prove<K: HashTrait, F: PrimeField>(
         current_polynomial = current_polynomial.partial_evaluate(0, random_challenge);
     }
 
-    // GKRVerifierProof {
-    //     claimed_sum,
-    //     round_univariate_polynomials,
-    // }
-
     GKRSumcheckProverProof {
         claimed_sum,
         round_univariate_polynomials,
@@ -63,51 +61,11 @@ pub fn prove<K: HashTrait, F: PrimeField>(
     }
 }
 
-pub fn verify<K: HashTrait, F: PrimeField>(
-    round_univariate_polynomials: Vec<UnivariatePoly<F>>,
-    claimed_sum: F,
-    transcript: &mut Transcript<K, F>,
-) -> GKRSumcheckVerifierProof<F> {
-    transcript.absorb(&field_element_to_bytes(claimed_sum));
-
-    let mut current_sum = claimed_sum;
-    let mut random_challenges = Vec::with_capacity(round_univariate_polynomials.len());
-
-
-    for round_polynomial in &round_univariate_polynomials {
-
-        let eval_at_zero = round_polynomial.full_coeff_evaluation(F::zero());
-        let eval_at_one = round_polynomial.full_coeff_evaluation(F::one());
-
-        if eval_at_zero + eval_at_one != current_sum {
-            return GKRSumcheckVerifierProof {
-                is_proof_valid: false,
-                random_challenges: vec![],
-                last_claimed_sum: current_sum, // this might give issue eventually
-            };
-        }
-
-        transcript.absorb(&univariate_to_bytes(round_polynomial));
-
-        let random_challenge = transcript.generate_random_challenge();
-
-        current_sum = round_polynomial.full_coeff_evaluation(random_challenge);
-
-        random_challenges.push(random_challenge);
-    }
-
-    GKRSumcheckVerifierProof {
-        is_proof_valid: true,
-        random_challenges,
-        last_claimed_sum: current_sum,
-    }
-}
-
-pub fn generate_round_univariate<F: PrimeField>(current_polynomial: &SumPoly<F>) -> UnivariatePoly<F> /*Vec<F>*/ {
+pub fn generate_round_univariate<F: PrimeField>(current_polynomial: &SumPoly<F>) -> UnivariatePoly<F> {
     let degree = current_polynomial.degree();
     let num_evaluations = degree + 1;
 
-    // let mut evaluations = Vec::with_capacity(num_evaluations);
+    
     let mut x_and_y = Vec::with_capacity(num_evaluations);
 
     for i in 0..num_evaluations {
@@ -126,18 +84,62 @@ pub fn generate_round_univariate<F: PrimeField>(current_polynomial: &SumPoly<F>)
     points.lagrange_interpolate()
 }
 
-pub fn univariate_to_bytes<F: PrimeField>(poly: &UnivariatePoly<F>) -> Vec<u8> {
-    // Serialize the degree first
-    let degree_bytes = poly.degree.into_bigint().to_bytes_le();
 
-    // Serialize each term in co_ex (coeff followed by exp)
+// GRK SUMCHECK VERIFIER
+pub fn verify<K: HashTrait, F: PrimeField>(
+    round_univariate_polynomials: Vec<UnivariatePoly<F>>,
+    claimed_sum: F,
+    transcript: &mut Transcript<K, F>,
+) -> GKRSumcheckVerifierProof<F> {
+
+    transcript.absorb(&field_element_to_bytes(claimed_sum));
+
+    let mut current_sum = claimed_sum;
+    let mut random_challenges = Vec::with_capacity(round_univariate_polynomials.len());
+
+
+    for round_polynomial in &round_univariate_polynomials {
+
+        let eval_at_zero = round_polynomial.full_coeff_evaluation(F::zero());
+        let eval_at_one = round_polynomial.full_coeff_evaluation(F::one());
+
+        if eval_at_zero + eval_at_one != current_sum {
+            return GKRSumcheckVerifierProof {
+                is_proof_valid: false,
+                random_challenges: vec![],
+                last_claimed_sum: current_sum,
+            };
+        }
+
+        // add to transcript
+        transcript.absorb(&univariate_to_bytes(round_polynomial));
+
+        let random_challenge = transcript.generate_random_challenge();
+
+        current_sum = round_polynomial.full_coeff_evaluation(random_challenge);
+
+        random_challenges.push(random_challenge);
+    }
+
+    GKRSumcheckVerifierProof {
+        is_proof_valid: true,
+        random_challenges,
+        last_claimed_sum: current_sum,
+    }
+}
+
+
+
+pub fn univariate_to_bytes<F: PrimeField>(poly: &UnivariatePoly<F>) -> Vec<u8> {
+    
+    let degree_bytes = poly.degree.into_bigint().to_bytes_le();
+  
     let terms_bytes = poly.co_ex.iter().flat_map(|term| {
         let coeff_bytes = term.coeff.into_bigint().to_bytes_le();
         let exp_bytes = term.exp.into_bigint().to_bytes_le();
         coeff_bytes.into_iter().chain(exp_bytes.into_iter())
     });
 
-    // Combine degree bytes and terms bytes into a single Vec<u8>
     degree_bytes.into_iter().chain(terms_bytes).collect()
 }
 
