@@ -43,7 +43,7 @@ impl<F: PrimeField + Borrow<Fp<MontBackend<FrConfig, 4>, 4>>> TrustedSetup<F> {
         }
     }
 
-    fn initiate_univariate_trusted_setup(setup_size: usize, init_tau: F) -> TrustedSetup<F> {
+    pub(crate) fn initiate_univariate_trusted_setup(setup_size: usize, init_tau: F) -> TrustedSetup<F> {
         let g1 = G1::generator(); // Generator in G1
         let mut g2_tau = G2::generator(); // Generator in G2
 
@@ -66,7 +66,7 @@ impl<F: PrimeField + Borrow<Fp<MontBackend<FrConfig, 4>, 4>>> TrustedSetup<F> {
         TrustedSetup::new(trusted_setup, g2_tau)
     }
 
-    fn contribute_to_setup(&mut self, tau: F) -> Self {
+    pub(crate) fn contribute_to_setup(&mut self, tau: F) -> Self {
         let powers_of_tau = self.powers_of_tau.clone();
         let mut cont_power = F::one();
 
@@ -218,7 +218,7 @@ mod tests {
     use ark_bn254::Fr;
     use polynomials::univariate::uni_poly::Term;
 
-    fn get_uni_poly() -> UnivariatePoly<Fr> {
+    pub fn get_uni_poly() -> UnivariatePoly<Fr> {
         UnivariatePoly::new(vec![
             Term::new(Fr::from(2), Fr::from(2)),
             Term::new(Fr::from(6), Fr::from(1)),
@@ -226,7 +226,7 @@ mod tests {
         ])
     }
 
-    fn get_trusted_setup<F: PrimeField + Borrow<Fp<MontBackend<FrConfig, 4>, 4>>>(
+    pub fn get_trusted_setup<F: PrimeField + Borrow<Fp<MontBackend<FrConfig, 4>, 4>>>(
     ) -> TrustedSetup<F> {
         let tau = F::from(5);
         TrustedSetup::initiate_univariate_trusted_setup(3, tau)
@@ -369,11 +369,11 @@ mod tests {
         let uni_poly = get_uni_poly();
         let mut trusted_setup = get_trusted_setup::<Fr>();
 
-        let contributed = trusted_setup.contribute_to_setup(Fr::from(820));
-        let contributed = trusted_setup.contribute_to_setup(Fr::from(83420));
-        let contributed = trusted_setup.contribute_to_setup(Fr::from(5650));
-        let contributed = trusted_setup.contribute_to_setup(Fr::from(2343));
-        let contributed = trusted_setup.contribute_to_setup(Fr::from(353));
+        trusted_setup = trusted_setup.contribute_to_setup(Fr::from(820));
+        trusted_setup = trusted_setup.contribute_to_setup(Fr::from(83420));
+        trusted_setup = trusted_setup.contribute_to_setup(Fr::from(5650));
+        trusted_setup = trusted_setup.contribute_to_setup(Fr::from(2343));
+        trusted_setup = trusted_setup.contribute_to_setup(Fr::from(353));
 
         let commit = trusted_setup.commit_to_polynomial(&uni_poly);
 
