@@ -1,6 +1,6 @@
 use crate::circuit::Circuit;
 use crate::gate::Ops;
-use ark_ff::PrimeField;
+use ark_ff::{BigInteger, PrimeField};
 use field_tracker::{end_tscope, start_tscope};
 use polynomials::multilinear::multilinear::{Multilinear, MultilinearPoly};
 use polynomials::product::product_poly::ProductPoly;
@@ -129,10 +129,6 @@ impl<F: PrimeField> ProofBuilder<F> {
         let current_o2 = next_poly.clone().full_evaluation(r_c.to_vec());
 
         if idx < num_layers - 1 {
-            // let next_poly = MultilinearPoly::new(w_i.to_vec());
-            // let mid = sum_check_proof.random_challenges.len() / 2;
-            // let (r_b, r_c) = sum_check_proof.random_challenges.split_at(mid);
-
             let (current_o1, current_o2) = self.update_challenges(current_o1, current_o2, transcript);
             self.claimed_sum = self.alpha * current_o1 + self.beta * current_o2;
             self.claimed_evaluations.push((current_o1, current_o2));
@@ -145,16 +141,11 @@ impl<F: PrimeField> ProofBuilder<F> {
         r_c: F,
         transcript: &mut Transcript<Keccak256, F>,
     ) -> (F, F) {
-        // self.current_rb = r_b.to_vec();
-        // self.current_rc = r_c.to_vec();
-        // let current_o1 = next_poly.clone().full_evaluation(r_b.to_vec());
-        // let current_o2 = next_poly.clone().full_evaluation(r_c.to_vec());
 
-        println!("current rb: {:?}", self.current_rb);
-
-        transcript.absorb(&to_bytes(&[r_b]));
+        transcript.absorb(r_b.into_bigint().to_bytes_be().as_slice());
         self.alpha = transcript.generate_random_challenge();
-        transcript.absorb(&to_bytes(&[r_c]));
+
+        transcript.absorb(r_c.into_bigint().to_bytes_be().as_slice());
         self.beta = transcript.generate_random_challenge();
 
         (r_b, r_c)

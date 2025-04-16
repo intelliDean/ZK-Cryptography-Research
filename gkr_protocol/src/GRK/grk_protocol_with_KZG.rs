@@ -183,7 +183,6 @@ pub fn process_kzg<F: PrimeField>(
 pub fn verify<F: PrimeField>(
     proof: GKRProof<F>,
     mut circuit: Circuit<F>,
-    inputs: &[F],
 ) -> bool {
     start_tscope!("Verifier");
 
@@ -566,7 +565,7 @@ mod test {
 
         // println!("Proof: {:?}", proof);
 
-        let verified = verify(proof, circuit, &input);
+        let verified = verify(proof, circuit);
         println!("Verified: {:?}", verified);
         assert_eq!(verified, true);
 
