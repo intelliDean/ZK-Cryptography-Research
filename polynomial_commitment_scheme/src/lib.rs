@@ -1,2 +1,2 @@
 pub mod univariate;
-mod multilinear;
+pub mod multilinear;

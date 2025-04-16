@@ -107,7 +107,7 @@ fn compute<F: PrimeField + Borrow<Fp<MontBackend<FrConfig, 4>, 4>>>(
 }
 
 // to add G1 to the transcript, i need to convert it to a bytes
-pub(crate) fn g1_to_bytes<F: PrimeField>(point: &G1Projective) -> Vec<u8> {
+pub fn g1_to_bytes<F: PrimeField>(point: &G1Projective) -> Vec<u8> {
     let mut bytes = Vec::new();
     let byte_len = F::BigInt::NUM_LIMBS * 8;
 

@@ -52,6 +52,9 @@ pub fn prove<F: PrimeField>(circuit: &mut Circuit<F>, inputs: &[F]) -> GKRProof<
         let fbc_poly = if idx == 0 {
             generate_fbc_poly(random_challenge, &mut circuit.clone(), idx, &w_i, &w_i)
         } else {
+            println!("Current rb: {:?}", proof.current_rb);
+            println!("Current rc: {:?}", proof.current_rc);
+
             fbc_poly_with_alpha_beta(
                 &mut circuit.clone(),
                 idx,
@@ -66,6 +69,8 @@ pub fn prove<F: PrimeField>(circuit: &mut Circuit<F>, inputs: &[F]) -> GKRProof<
 
         proof.process_layer(&mut transcript, fbc_poly, idx, num_layers, &w_i);
     }
+
+
     proof.build(output_poly)
 }
 

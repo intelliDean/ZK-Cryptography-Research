@@ -1,114 +1,34 @@
 use crate::circuit::Circuit;
 use crate::gate::Ops;
+use crate::GRK::gkr_prover::GKRProof;
 use ark_ff::{BigInteger, PrimeField};
 use polynomials::multilinear::multilinear::{Multilinear, MultilinearPoly};
-use polynomials::product::product_poly::ProductPoly;
-use polynomials::sum::sum_poly::SumPoly;
-use polynomials::univariate::uni_poly::UnivariatePoly;
 use sha3::{Digest, Keccak256};
-use sumcheck_protocol::gkr_sumcheck::{
-    prove as sub_prove,
-    verify as sub_verify
-};
+use sumcheck_protocol::gkr_sumcheck::verify as sub_verify;
 use sumcheck_protocol::transcript::{to_bytes, HashTrait, Transcript};
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct GKRProof<F: PrimeField> {
-    output_poly: MultilinearPoly<F>,
-    proof_polynomials: Vec<Vec<UnivariatePoly<F>>>,
-    claimed_evaluations: Vec<(F, F)>,
-}
 
-pub fn prove <F: PrimeField> (circuit: &mut Circuit<F>, inputs: &[F]) -> GKRProof<F> {
+
+// GRK PROTOCOL VERIFIER
+pub fn verify<F: PrimeField>(proof: GKRProof<F>, mut circuit: Circuit<F>, inputs: &[F]) -> bool {
     let mut transcript = Transcript::<Keccak256, F>::init(Keccak256::new());
-    let inputs_poly = MultilinearPoly::new(inputs.to_vec());
-    // prover evaluating the circit
-    let mut circuit_evaluations = circuit.run_circuit(inputs_poly);
-    // turn the multilinear poly at index 0 to a vec so you could add to it.
-    let mut w_0 = circuit_evaluations.first().unwrap().polynomial.to_vec();
+    let mut state = VerifierState::new();
 
-    if w_0.len() == 1 { // if it's the final output of the circuit
-        w_0.push(F::zero()); // add 0 to make it a valid evaluation multilinear
-    }
-    let output_poly = MultilinearPoly::new(w_0);
-
-    let (mut claimed_sum, random_challenge) = initiate_protocol(&mut transcript, &output_poly);
+    // initial setup
+    transcript.absorb(&to_bytes(&proof.output_poly.polynomial));
+    let init_challenge = transcript.generate_random_challenge();
+    state.current_claim = proof.output_poly.clone().full_evaluation(vec![init_challenge]);
+    transcript.absorb(&to_bytes(&[state.current_claim]));
 
     let num_layers = circuit.layers.len();
 
-    let mut claimed_evaluations = Vec::with_capacity(num_layers.saturating_sub(1));
-    let mut proof_polys = Vec::with_capacity(num_layers);
-    let mut current_rb = Vec::new();
-    let mut current_rc = Vec::new();
-    let mut alpha = F::from(0);
-    let mut beta = F::from(0);
+    let mut verifier_result = false;
 
-    // circuit_evaluations.reverse();
-    let mut layers = circuit.layers.clone();
-    // layers.reverse();
-
-    for (idx, _) in layers.into_iter().enumerate() {
-        let w_i = if idx == num_layers - 1 {
-            inputs.to_vec()
-        } else {
-            circuit_evaluations[idx + 1].polynomial.clone()
-        };
-
-        let fbc_poly = if idx == 0 {
-            get_fbc_poly(random_challenge, circuit, idx, &w_i, &w_i)
-        } else {
-            get_merged_fbc_poly(circuit, idx, &w_i, &w_i, &current_rb, &current_rc, alpha, beta)
-        };
-
-        let sum_check_proof = sub_prove(fbc_poly, claimed_sum, &mut transcript);
-        proof_polys.push(sum_check_proof.round_univariate_polynomials);
-
-        if idx < num_layers - 1 {
-            let next_poly = MultilinearPoly::new(w_i);
-            let mid = sum_check_proof.random_challenges.len() / 2;
-            let (r_b, r_c) = sum_check_proof.random_challenges.split_at(mid);
-
-            let o_1 = next_poly.clone().full_evaluation(r_b.to_vec());
-            let o_2 = next_poly.full_evaluation(r_c.to_vec());
-            current_rb = r_b.to_vec();
-            current_rc = r_c.to_vec();
-
-            transcript.absorb(&to_bytes(&[o_1]));
-            alpha = transcript.generate_random_challenge();
-
-            transcript.absorb(&to_bytes(&[o_2]));
-            beta = transcript.generate_random_challenge();
-
-            claimed_sum = (alpha * o_1) + (beta * o_2);
-            claimed_evaluations.push((o_1, o_2));
-        }
-    }
-
-    GKRProof {
-        output_poly,
-        proof_polynomials: proof_polys,
-        claimed_evaluations,
-    }
-}
-
-pub fn verify <F: PrimeField> (proof: GKRProof<F>, mut circuit: Circuit<F>, inputs: &[F]) -> bool {
-    let mut transcript = Transcript::<Keccak256, F>::init(Keccak256::new());
-
-    let (mut current_claim, init_random_challenge) =
-        initiate_protocol(&mut transcript, &proof.output_poly);
-
-    let mut alpha = F::from(0);
-    let mut beta = F::from(0);
-    let mut prev_sumcheck_random_challenges = Vec::new();
-
-    // circuit.layers.reverse();
-    let num_layers = circuit.layers.len();
-
-    for (i, _) in circuit.layers.iter().enumerate() {
-
+    // verify each layer
+    for i in 0..num_layers {
         let sum_check_verify = sub_verify(
             proof.proof_polynomials[i].clone(),
-            current_claim,
+            state.current_claim,
             &mut transcript,
         );
 
@@ -116,125 +36,92 @@ pub fn verify <F: PrimeField> (proof: GKRProof<F>, mut circuit: Circuit<F>, inpu
             return false;
         }
 
-        let current_random_challenge = sum_check_verify.random_challenges;
+         verifier_result = state.update(
+            &proof,
+            &mut circuit,
+            inputs,
+            i,
+            &sum_check_verify.random_challenges,
+            init_challenge,
+            sum_check_verify.last_claimed_sum,
+            &mut transcript,
+        );
 
-        let (o_1, o_2) = if i == num_layers - 1 {
-            evaluate_input_poly(inputs, &current_random_challenge)
+        if !verifier_result {
+            return false;
+        }
+    }
+    verifier_result
+}
+
+
+
+struct VerifierState<F: PrimeField> {
+    alpha: F,
+    beta: F,
+    prev_challenges: Vec<F>,
+    current_claim: F,
+}
+
+impl<F: PrimeField> VerifierState<F> {
+    fn new() -> Self {
+        Self {
+            alpha: F::zero(),
+            beta: F::zero(),
+            prev_challenges: Vec::new(),
+            current_claim: F::zero(),
+        }
+    }
+
+    fn update(
+        &mut self,
+        proof: &GKRProof<F>,
+        circuit: &mut Circuit<F>,
+        inputs: &[F],
+        i: usize,
+        current_challenges: &[F],
+        init_challenge: F,
+        last_claim: F,
+        transcript: &mut Transcript<Keccak256, F>,
+    ) -> bool {
+        let (o_1, o_2) = if i == circuit.layers.len() - 1 {
+            evaluate_input(inputs, current_challenges)
         } else {
             proof.claimed_evaluations[i]
         };
 
         let expected_claim = if i == 0 {
-            get_verifier_claim(
-                circuit.clone(),
-                i,
-                init_random_challenge,
-                &current_random_challenge,
-                o_1,
-                o_2,
-            )
+            verifier_generates_claim(circuit.clone(), i, init_challenge, current_challenges, o_1, o_2)
         } else {
-            get_merged_verifier_claim(
+            verifier_claim_with_alpha_beta(
                 circuit.clone(),
                 i,
-                &current_random_challenge,
-                &prev_sumcheck_random_challenges,
+                current_challenges,
+                &self.prev_challenges,
                 o_1,
                 o_2,
-                alpha,
-                beta,
+                self.alpha,
+                self.beta,
             )
         };
 
-        if expected_claim != sum_check_verify.last_claimed_sum {
+        if expected_claim != last_claim {
             return false;
         }
 
-        prev_sumcheck_random_challenges = current_random_challenge;
+        self.prev_challenges = current_challenges.to_vec();
 
         transcript.absorb(&to_bytes(&[o_1]));
-        alpha = transcript.generate_random_challenge();
-
+        self.alpha = transcript.generate_random_challenge();
         transcript.absorb(&to_bytes(&[o_2]));
-        beta = transcript.generate_random_challenge();
+        self.beta = transcript.generate_random_challenge();
+        self.current_claim = self.alpha * o_1 + self.beta * o_2;
 
-        current_claim = (alpha * o_1) + (beta * o_2);
+        true
     }
-
-    true
 }
 
-fn initiate_protocol<K: HashTrait, F: PrimeField>(
-    transcript: &mut Transcript<K, F>,
-    output_poly: &MultilinearPoly<F>,
-) -> (F, F) {
-    transcript.absorb(&to_bytes(&output_poly.polynomial));
-
-    let random_challenge = transcript.generate_random_challenge();
-    let m_0 = output_poly.clone().full_evaluation(vec![random_challenge]);
-
-    transcript.absorb(&to_bytes(&[m_0]));
-
-    (m_0, random_challenge)
-}
-
-fn tensor_add_mul_polynomials <F: PrimeField> (poly_a: &[F], poly_b: &[F], op: Ops) -> MultilinearPoly<F> {
-    let new_eval: Vec<F> = poly_a
-        .iter()
-        .flat_map(|a| poly_b.iter().map({
-            let value = op.clone();
-            move |b| value.clone().operation(a,b)
-            }))
-        .collect();
-
-    MultilinearPoly::new(new_eval)
-}
-
-// get_fbc_poly(random_challenge, &circuit, idx, &w_i, &w_i)
-pub fn get_fbc_poly<F: PrimeField> (random_challenge: F, circuit: &mut Circuit<F>, layer_idx: usize, w_b: &[F], w_c: &[F]) -> SumPoly<F> {
-    let (add_i, mul_i) = circuit.add_i_and_mul_i_mle(layer_idx);
-
-    let add_i_eval = add_i.partial_evaluation(0, random_challenge);
-    let mul_i_i_eval = mul_i.partial_evaluation(0, random_challenge);
-
-    let summed_w_poly = tensor_add_mul_polynomials(w_b, w_c, Ops::ADD);
-    let multiplied_w_poly = tensor_add_mul_polynomials(w_b, w_c, Ops::MUL);
-
-    let add_eval_product = ProductPoly::new(vec![add_i_eval, summed_w_poly]);
-    let mul_eval_product = ProductPoly::new(vec![mul_i_i_eval, multiplied_w_poly]);
-
-    SumPoly::new(vec![add_eval_product, mul_eval_product])
-}
-fn get_merged_fbc_poly<F: PrimeField> (
-    circuit: &mut Circuit<F>,
-    layer_idx: usize,
-    w_b: &[F],
-    w_c: &[F],
-    r_b: &[F],
-    r_c: &[F],
-    alpha: F,
-    beta: F,
-) -> SumPoly<F> {
-    let (add_i, mul_i) = circuit.add_i_and_mul_i_mle(layer_idx);
-
-    let new_add_i =
-        add_i.multi_partial_evaluate(r_b).multiply_by(alpha) + add_i.multi_partial_evaluate(r_c).multiply_by(beta);
-
-    let new_mul_i =
-        mul_i.multi_partial_evaluate(r_b).multiply_by(alpha) + mul_i.multi_partial_evaluate(r_c).multiply_by(beta);
-
-    let summed_w_poly = tensor_add_mul_polynomials(w_b, w_c, Ops::ADD);
-    let multiplied_w_poly = tensor_add_mul_polynomials(w_b, w_c, Ops::MUL);
-
-    let add_product_poly =
-        ProductPoly::new(vec![new_add_i, summed_w_poly]);
-    let mul_product_poly =
-        ProductPoly::new(vec![new_mul_i, multiplied_w_poly]);
-
-    SumPoly::new(vec![add_product_poly, mul_product_poly])
-}
-
-fn get_verifier_claim <F: PrimeField> (
+fn verifier_generates_claim<F: PrimeField>(
     mut circuit: Circuit<F>,
     layer_idx: usize,
     init_random_challenge: F,
@@ -242,21 +129,18 @@ fn get_verifier_claim <F: PrimeField> (
     o_1: F,
     o_2: F,
 ) -> F {
-
     let mut all_random_challenges = Vec::with_capacity(1 + sumcheck_random_challenges.len());
-
     all_random_challenges.push(init_random_challenge);
     all_random_challenges.extend_from_slice(sumcheck_random_challenges);
 
     let (add_i, mul_i) = circuit.add_i_and_mul_i_mle(layer_idx);
-
     let a_r = add_i.clone().full_evaluation(all_random_challenges.clone());
     let m_r = mul_i.full_evaluation(all_random_challenges);
 
     (a_r * (o_1 + o_2)) + (m_r * (o_1 * o_2))
 }
 
-fn get_merged_verifier_claim <F: PrimeField> (
+fn verifier_claim_with_alpha_beta<F: PrimeField>(
     mut circuit: Circuit<F>,
     layer_idx: usize,
     current_random_challenge: &[F],
@@ -266,15 +150,11 @@ fn get_merged_verifier_claim <F: PrimeField> (
     alpha: F,
     beta: F,
 ) -> F {
-
-    let (prev_r_b, prev_r_c) =
-        previous_random_challenge.split_at(previous_random_challenge.len() / 2);
-
+    let (prev_r_b, prev_r_c) = previous_random_challenge.split_at(previous_random_challenge.len() / 2);
     let (add_i, mul_i) = circuit.add_i_and_mul_i_mle(layer_idx);
 
     let new_add_i = add_i.multi_partial_evaluate(prev_r_b).multiply_by(alpha)
         + add_i.multi_partial_evaluate(prev_r_c).multiply_by(beta);
-
     let new_mul_i = mul_i.multi_partial_evaluate(prev_r_b).multiply_by(alpha)
         + mul_i.multi_partial_evaluate(prev_r_c).multiply_by(beta);
 
@@ -284,10 +164,12 @@ fn get_merged_verifier_claim <F: PrimeField> (
     (a_r * (o_1 + o_2)) + (m_r * (o_1 * o_2))
 }
 
-fn evaluate_input_poly <F: PrimeField> (inputs: &[F], sumcheck_random_challenges: &[F]) -> (F, F) {
+fn evaluate_input<F: PrimeField>(inputs: &[F], sumcheck_random_challenges: &[F]) -> (F, F) {
     let input_poly = MultilinearPoly::new(inputs.to_vec());
-
     let (r_b, r_c) = sumcheck_random_challenges.split_at(sumcheck_random_challenges.len() / 2);
+
+    println!("C rb: {:?}", r_b);
+    println!("C rc: {:?}", r_c);
 
     let o_1 = input_poly.clone().full_evaluation(r_b.to_vec());
     let o_2 = input_poly.full_evaluation(r_c.to_vec());
@@ -299,14 +181,20 @@ fn evaluate_input_poly <F: PrimeField> (inputs: &[F], sumcheck_random_challenges
 mod test {
     use super::*;
     use crate::gate::{Gate, Ops};
-    use ark_bn254::{Config, Fq, Fr, FrConfig};
-    use ark_ff::{Fp256, MontBackend};
-    use polynomials::multilinear::multilinear::{Multilinear, MultilinearPoly};
-    use polynomials::product::product_poly::ProductPoly;
-    use polynomials::sum::sum_poly::SumPoly;
+    use crate::GRK::gkr_prover::prove;
     use crate::layer::Layer;
+    // use ark_bn254::{Fq, Fr};
+    use ark_std::{test_rng, UniformRand};
+    use ark_std::rand::Rng;
+    use polynomials::multilinear::multilinear::{Multilinear, MultilinearPoly};
 
-    fn get_circuit() -> Circuit<Fr> {
+
+    use field_tracker::{print_summary, Ft};
+    use polynomials::multilinear::multilinear::to_field;
+
+    type Fq = Ft!(ark_bn254::Fr);
+
+    fn get_circuit() -> Circuit<Fq> {
         let layer0 = Layer::new(vec![Gate::new(0, 0, 1, Ops::MUL)]);
 
         let layer1 = Layer::new(vec![Gate::new(0, 0, 1, Ops::MUL), Gate::new(1, 2, 3, Ops::ADD)]);
@@ -326,17 +214,112 @@ mod test {
         Circuit::new(circuit)
     }
 
-    fn get_input() -> MultilinearPoly<Fr> {
+    // fn get_big_inputs() -> Vec<Fq> {
+    //     let size = 1 << 3; // 1,048,576 elements
+    //     let mut rng = test_rng();
+    //
+    //     let poly: Vec<Fq> = (0..size)
+    //         .map(|_| Fq::from(rng.gen_range(1..20)))
+    //         .collect();
+    //
+    //     poly
+    // }
+
+    fn get_big_inputs(size: usize) -> Vec<Fq> {
+        let size = 1 << size;
+        let mut rng = test_rng();
+
+        let poly: Vec<Fq> = (0..size)
+            .map(|_| {
+                let random_val = rng.gen_range(1..20);
+                Fq::from(random_val)
+            })
+            .collect();
+
+        poly
+    }
+
+    fn get_big_circuit(size: usize) -> Circuit<Fq> {
+        let num_layers = size;
+
+
+        let input_size = 1 << num_layers;  // 2^20 = 1,048,576
+        let mut layers = Vec::new();
+
+        // Number of layers - using log2(input_size) for depth
+        // let num_layers = 4;  // log2(2^20) = 20
+
+        let mut current_size = input_size;
+        let mut next_wire = input_size;  // Start wire indices after inputs
+
+        for layer_idx in 0..num_layers {
+            let mut gates = Vec::new();
+            let gates_per_layer = current_size / 2;  // Halve the size each layer
+
+            for i in 0..gates_per_layer {
+                let left = i * 2;
+                let right = left + 1;
+                let output =  i;
+
+                // Alternate between ADD and MUL operations
+                let op = if (layer_idx + i) % 2 == 0 { Ops::ADD } else { Ops::MUL };
+                gates.push(Gate::new(output, left, right, op));
+            }
+
+            layers.push(Layer::new(gates));
+            next_wire += gates_per_layer;
+            current_size = gates_per_layer;
+        }
+        layers.reverse();
+
+        let circuit = Circuit::new(layers);
+
+        // Optional: Print circuit stats
+        // println!("Number of layers: {}", circuit.layers.len());
+        // println!("Input size: {}", input_size);
+        // println!("Total gates: {}", circuit.layers.iter().map(|l| l.gates.len()).sum::<usize>());
+
+        circuit
+    }
+    fn get_circuit1() -> Circuit<Fq> {
+        let layer0 = Layer::new(vec![Gate::new(0, 0, 1, Ops::MUL)]);
+
+        let layer1 = Layer::new(vec![Gate::new(0, 0, 1, Ops::MUL), Gate::new(1, 2, 3, Ops::ADD)]);
+
+        let layer2 = Layer::new( vec![
+            Gate::new(0, 0, 1, Ops::MUL),
+            Gate::new(1, 1, 3, Ops::ADD),
+            Gate::new(2, 4, 5, Ops::ADD),
+            Gate::new(3, 6, 7, Ops::MUL),
+        ]);
+
+        let circuit = vec![layer0, layer1, layer2];
+
+
+        println!("Layers: {:?}", &circuit);
+
+        Circuit::new(circuit)
+    }
+
+    fn get_input() -> MultilinearPoly<Fq> {
         MultilinearPoly::new(vec![
-            Fr::from(1),
-            Fr::from(2),
-            Fr::from(3),
-            Fr::from(4),
-            Fr::from(5),
-            Fr::from(6),
-            Fr::from(7),
-            Fr::from(8),
+            Fq::from(1),
+            Fq::from(2),
+            Fq::from(3),
+            Fq::from(4),
+            Fq::from(5),
+            Fq::from(6),
+            Fq::from(7),
+            Fq::from(8),
         ])
+    }
+
+    #[test]
+    fn t() {
+        // println!("{:?}", get_big_inputs());
+
+        dbg!(get_big_circuit(3));
+        dbg!(get_big_inputs(3));
     }
 
     #[test]
@@ -346,7 +329,7 @@ mod test {
 
         let expected_poly = vec![Fq::from(0), Fq::from(3), Fq::from(2), Fq::from(5)];
 
-        let result = tensor_add_mul_polynomials(poly_a, poly_b, Ops::ADD);
+        let result = Ops::ADD.cartesian_operations(poly_a, poly_b);
 
         assert_eq!(result.polynomial, expected_poly);
 
@@ -364,7 +347,7 @@ mod test {
             Fq::from(5),
         ];
 
-        let result = tensor_add_mul_polynomials(poly_a, poly_b, Ops::ADD);
+        let result =   Ops::ADD.cartesian_operations(poly_a, poly_b);
 
         assert_eq!(result.polynomial, expected_poly);
     }
@@ -376,7 +359,7 @@ mod test {
 
         let expected_poly = vec![Fq::from(0), Fq::from(0), Fq::from(0), Fq::from(6)];
 
-        let result = tensor_add_mul_polynomials(poly_a, poly_b, Ops::MUL);
+        let result = Ops::MUL.cartesian_operations(poly_a, poly_b);
 
         assert_eq!(result.polynomial, expected_poly);
 
@@ -394,7 +377,7 @@ mod test {
             Fq::from(6),
         ];
 
-        let result = tensor_add_mul_polynomials(poly_a, poly_b, Ops::MUL);
+        let result = Ops::MUL.cartesian_operations(poly_a, poly_b);
 
         assert_eq!(result.polynomial, expected_poly);
     }
@@ -402,25 +385,58 @@ mod test {
     #[test]
     fn test_gkr_protocol() {
 
-       let mut circuit = get_circuit();
+        let mut circuit = get_circuit();
         let input = [
-            Fr::from(1),
-            Fr::from(2),
-            Fr::from(3),
-            Fr::from(4),
-            Fr::from(5),
-            Fr::from(6),
-            Fr::from(7),
-            Fr::from(8),
+            Fq::from(1),
+            Fq::from(2),
+            Fq::from(3),
+            Fq::from(4),
+            Fq::from(5),
+            Fq::from(6),
+            Fq::from(7),
+            Fq::from(8),
         ];
 
         let proof = prove(&mut circuit, &input.clone());
 
         // println!("Result: {:?}", proof);
 
+        let input1 = [
+            Fq::from(1),
+            Fq::from(2),
+            Fq::from(2),
+            Fq::from(4),
+            Fq::from(5),
+            Fq::from(6),
+            Fq::from(7),
+            Fq::from(8),
+        ];
+
         let verified = verify(proof, circuit, &input);
         println!("Verified: {:?}", verified);
         assert_eq!(verified, true);
+
+        print_summary!();
+    }
+
+    #[test]
+    fn test_gkr_protocol_large_input() {
+
+        let size = 5;
+        let mut circuit = get_big_circuit(size);
+        let input = get_big_inputs(size);
+
+        let proof = prove(&mut circuit, &input.clone());
+
+        println!("Result: {:?}", proof);
+
+        let verified = verify(proof, circuit, &input);
+        println!("Verified: {:?}", verified);
+        assert_eq!(verified, true);
+
+        print_summary!();
+
+
     }
 }
 

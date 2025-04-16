@@ -1,2 +1,2 @@
-mod non_interactive_univariate_pcs;
-mod univariate_pcs;
+pub mod non_interactive_univariate_pcs;
+pub mod univariate_pcs;

@@ -76,13 +76,6 @@ impl<F: PrimeField + Borrow<Fp<MontBackend<FrConfig, 4>, 4>>> TrustedSetup<F> {
         TrustedSetup::new(g1_evals, g2_evals)
     }
 
-
-
-
-
-
-
-
     pub fn commit_to_polynomial (&self, multilinear: &MultilinearPoly<F>) -> G1 {
         assert!(self.powers_of_tau.len().is_power_of_two());
         assert_eq!(
@@ -160,11 +153,6 @@ impl<F: PrimeField + Borrow<Fp<MontBackend<FrConfig, 4>, 4>>> TrustedSetup<F> {
 
         lhs == rhs
     }
-}
-
-fn prover_proves_pcs<F: PrimeField> (
-    trusted_setup: TrustedSetup<F>, multilinear: MultilinearPoly<F>) {
-
 }
 
 fn get_quotient<F: PrimeField>(f_1: &Vec<F>, f_0: &Vec<F>) -> MultilinearPoly<F> {

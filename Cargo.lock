@@ -499,6 +499,7 @@ dependencies = [
  "ark-ff",
  "ark-std",
  "field-tracker",
+ "polynomial_commitment_scheme",
  "polynomials",
  "sha3",
  "sumcheck_protocol",

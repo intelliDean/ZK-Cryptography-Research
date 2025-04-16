@@ -1,19 +1,18 @@
-use ark_bn254::{Bn254, Config, Fr, FrConfig, G1Projective as G1, G2Projective as G2};
+use ark_bn254::{Bn254, Fr, FrConfig, G1Projective as G1, G2Projective as G2};
 use ark_ec::pairing::{Pairing, PairingOutput};
 use ark_ec::{PrimeGroup, VariableBaseMSM};
 use ark_ff::{Field, Fp, MontBackend, PrimeField, UniformRand};
 use ark_poly::Polynomial;
 use ark_std::iterable::Iterable;
 use polynomials::multilinear::multilinear::{Multilinear, MultilinearPoly};
-use polynomials::univariate::uni_poly::UnivariatePoly;
 use std::borrow::Borrow;
 use std::marker::PhantomData;
 use std::ops::Mul;
 
 #[derive(Clone, PartialEq, Debug)]
 pub struct MultiProof<F: PrimeField> {
-    v: F,               //full evaluation at all vars
-    quotients: Vec<G1>, //all encrypted quotients
+    pub v: F,               //full evaluation at all vars
+    pub quotients: Vec<G1>, //all encrypted quotients
 }
 
 impl<F: PrimeField> MultiProof<F> {
@@ -23,12 +22,12 @@ impl<F: PrimeField> MultiProof<F> {
 }
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
-pub struct TrustedSetup<F: PrimeField> {
+pub struct KZG<F: PrimeField> {
     pub powers_of_tau: Vec<G1>,
     pub g2_tau: Vec<G2>,
     _phantom: PhantomData<F>,
 }
-impl<F: PrimeField + Borrow<Fp<MontBackend<FrConfig, 4>, 4>>> TrustedSetup<F> {
+impl<F: PrimeField + Borrow<Fp<MontBackend<FrConfig, 4>, 4>>> KZG<F> {
     fn new(powers_of_tau: Vec<G1>, g2_tau: Vec<G2>) -> Self {
         Self {
             powers_of_tau,
@@ -42,6 +41,9 @@ impl<F: PrimeField + Borrow<Fp<MontBackend<FrConfig, 4>, 4>>> TrustedSetup<F> {
         contributing, then they can go ahead to use all the taus to create the setup
     */
     pub fn multilinear_trusted_setup(tau_var: &[F]) -> Self {
+
+        println!("Tau len that comes in: {:?}", tau_var.len());
+
         let g1 = G1::generator();
         let g2 = G2::generator();
 
@@ -73,7 +75,7 @@ impl<F: PrimeField + Borrow<Fp<MontBackend<FrConfig, 4>, 4>>> TrustedSetup<F> {
             g1_evals.push(g1.mul(res));
         }
 
-        TrustedSetup::new(g1_evals, g2_evals)
+        KZG::new(g1_evals, g2_evals)
     }
 
     pub fn commit_to_polynomial (&self, multilinear: &MultilinearPoly<F>) -> G1 {
@@ -102,7 +104,7 @@ impl<F: PrimeField + Borrow<Fp<MontBackend<FrConfig, 4>, 4>>> TrustedSetup<F> {
         res
     }
 
-    pub fn open_polynomial(&self, multilinear: MultilinearPoly<F>, open_at: &[F]) -> MultiProof<F> {
+    pub fn open_polynomial(&self, multilinear: &MultilinearPoly<F>, open_at: &[F]) -> MultiProof<F> {
         //full evaluation of the polynomial to get V
         let v = multilinear.clone().full_evaluation(open_at.to_vec());
 
@@ -121,6 +123,8 @@ impl<F: PrimeField + Borrow<Fp<MontBackend<FrConfig, 4>, 4>>> TrustedSetup<F> {
 
             // to get quotient, we do f(1) - f(0)
             let quo = get_quotient(&f_1.polynomial, &f_0.polynomial);
+
+            println!("quotients: {:?}, open vars: {:?}", quo.polynomial.len(), open_at.len());
             //we blow up by adding 0 e.g., 0a + 3bc
             let blown = blow_up_poly_with_zero(&quo, open_at.len());
 
@@ -133,6 +137,9 @@ impl<F: PrimeField + Borrow<Fp<MontBackend<FrConfig, 4>, 4>>> TrustedSetup<F> {
     }
 
     pub fn verifier_verifies(&self, commitment: G1, all_a: &[F], proof: &MultiProof<F>) -> bool {
+        println!("powers of tau: {:?}", self.powers_of_tau.len());
+        println!("all a: {:?}", all_a.len());
+
         let g1 = G1::generator();
         let g2 = G2::generator();
 
@@ -180,6 +187,9 @@ fn blow_up_poly_with_zero<F: PrimeField>(
         target_size.is_power_of_two() && orig_len.is_power_of_two(),
         "polynomial must be a power of 2"
     );
+
+    println!("target_size: {}, original len: {}", target_size, orig_len);
+
     assert!(
         target_size > orig_len,
         "Blown size must be > the original size"
@@ -235,6 +245,7 @@ mod tests {
     #[test]
     fn test_generate_hypercube() {
         let result = generate_hypercube(4);
+
         let expected = vec![
             vec![false, false], // 00
             vec![false, true],  //  01
@@ -246,8 +257,7 @@ mod tests {
 
     #[test]
     fn test_multilinear_setup() {
-        let res = TrustedSetup::multilinear_trusted_setup(&[Fr::from(2), Fr::from(6), Fr::from(6)]);
-
+        let res = KZG::multilinear_trusted_setup(&[Fr::from(2), Fr::from(6), Fr::from(6)]);
         println!("Result: {:?}", res);
 
         assert_eq!(res.powers_of_tau.len(), 8);
@@ -256,7 +266,7 @@ mod tests {
     #[test]
     fn test_commitment() {
         let trusted_setup =
-            TrustedSetup::multilinear_trusted_setup(&[Fr::from(2), Fr::from(6), Fr::from(6)]);
+            KZG::multilinear_trusted_setup(&[Fr::from(2), Fr::from(6), Fr::from(6)]);
 
         let poly = get_poly();
 
@@ -268,11 +278,11 @@ mod tests {
     #[test]
     fn test_open_commitment() {
         let trusted_setup =
-            TrustedSetup::multilinear_trusted_setup(&[Fr::from(5), Fr::from(2), Fr::from(3)]);
+            KZG::multilinear_trusted_setup(&[Fr::from(5), Fr::from(2), Fr::from(3)]);
 
         let poly = get_poly();
 
-        let res = trusted_setup.open_polynomial(poly, &[Fr::from(6), Fr::from(4), Fr::from(0)]);
+        let res = trusted_setup.open_polynomial(&poly, &[Fr::from(6), Fr::from(4), Fr::from(0)]);
         assert_eq!(res.quotients.len(), 3);
 
         println!("Result: {:?}", res);
@@ -305,7 +315,7 @@ mod tests {
     fn test_protocol() {
 
         //Trusted Setup ceremony
-        let trusted_setup = TrustedSetup::multilinear_trusted_setup(
+        let trusted_setup = KZG::multilinear_trusted_setup(
             &[Fr::from(5), Fr::from(2), Fr::from(3)]
         );
 
@@ -327,7 +337,7 @@ mod tests {
         let a = &[Fr::from(6), Fr::from(4), Fr::from(0)];
 
         //the prover opens the polynomial at 'a' and sends the proof (v, quotients) to the verifier
-        let proof = trusted_setup.open_polynomial(poly, a);
+        let proof = trusted_setup.open_polynomial(&poly, a);
 
         //the verifier verifies the proof sent by the prover
         let verify = trusted_setup.verifier_verifies(commitment, a, &proof);
@@ -342,7 +352,7 @@ mod tests {
     #[test]
     fn test_verify_to_fail() {
 
-        let trusted_setup = TrustedSetup::multilinear_trusted_setup(
+        let trusted_setup = KZG::multilinear_trusted_setup(
             &[Fr::from(5), Fr::from(2), Fr::from(3)]
         );
 
@@ -364,7 +374,7 @@ mod tests {
         let a = &[Fr::from(6), Fr::from(4), Fr::from(0)];
 
         //the prover opens the polynomial at 'a' and sends the proof (v, quotients) to the verifier
-        let proof = trusted_setup.open_polynomial(poly, a);
+        let proof = trusted_setup.open_polynomial(&poly, a);
 
         let false_proof = MultiProof::new(Fr::from(120), proof.quotients.clone());
 
