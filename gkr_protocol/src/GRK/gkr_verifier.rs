@@ -86,6 +86,7 @@ impl<F: PrimeField> VerifierState<F> {
         transcript: &mut Transcript<Keccak256, F>,
     ) -> bool {
         let (o_1, o_2) = if i == circuit.layers.len() - 1 {
+            // KZG: verifier verifies the commitment
             let (eval_rb, eval_rc, w_result) = verify_input(&proof.kzg_proof, &current_challenges.to_vec());
 
             if !w_result {
@@ -172,19 +173,6 @@ fn verifier_claim_with_alpha_beta<F: PrimeField>(
     (a_r * (o_1 + o_2)) + (m_r * (o_1 * o_2))
 }
 
-fn evaluate_input<F: PrimeField>(inputs: &[F], sumcheck_random_challenges: &[F]) -> (F, F) {
-    let input_poly = MultilinearPoly::new(inputs.to_vec());
-    let (r_b, r_c) = sumcheck_random_challenges.split_at(sumcheck_random_challenges.len() / 2);
-
-    println!("C rb: {:?}", r_b);
-    println!("C rc: {:?}", r_c);
-
-    let o_1 = input_poly.clone().full_evaluation(r_b.to_vec());
-    let o_2 = input_poly.full_evaluation(r_c.to_vec());
-
-    (o_1, o_2)
-}
-
 #[cfg(test)]
 mod test {
     use super::*;
@@ -243,8 +231,6 @@ mod test {
         let input_size = 1 << num_layers;  // 2^20 = 1,048,576
         let mut layers = Vec::new();
 
-        // Number of layers - using log2(input_size) for depth
-        // let num_layers = 4;  // log2(2^20) = 20
 
         let mut current_size = input_size;
         let mut next_wire = input_size;  // Start wire indices after inputs
@@ -270,11 +256,6 @@ mod test {
         layers.reverse();
 
         let circuit = Circuit::new(layers);
-
-        // Optional: Print circuit stats
-        // println!("Number of layers: {}", circuit.layers.len());
-        // println!("Input size: {}", input_size);
-        // println!("Total gates: {}", circuit.layers.iter().map(|l| l.gates.len()).sum::<usize>());
 
         circuit
     }
