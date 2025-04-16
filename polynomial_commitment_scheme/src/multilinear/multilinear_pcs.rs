@@ -7,7 +7,10 @@ use ark_std::iterable::Iterable;
 use polynomials::multilinear::multilinear::{Multilinear, MultilinearPoly};
 use std::borrow::Borrow;
 use std::marker::PhantomData;
-use std::ops::Mul;
+use std::ops::{Mul, Sub};
+// use ark_ec::{G1Affine, G2Affine}; // Adjust based on your library
+use ark_std::One;
+
 
 #[derive(Clone, PartialEq, Debug)]
 pub struct MultiProof<F: PrimeField> {
@@ -27,7 +30,7 @@ pub struct KZG<F: PrimeField> {
     pub g2_tau: Vec<G2>,
     _phantom: PhantomData<F>,
 }
-impl<F: PrimeField + Borrow<Fp<MontBackend<FrConfig, 4>, 4>>> KZG<F> {
+impl<F: PrimeField> KZG<F> {
     fn new(powers_of_tau: Vec<G1>, g2_tau: Vec<G2>) -> Self {
         Self {
             powers_of_tau,
@@ -40,7 +43,7 @@ impl<F: PrimeField + Borrow<Fp<MontBackend<FrConfig, 4>, 4>>> KZG<F> {
         the variables ot tau, each member should contribute one tau each. When all members are done
         contributing, then they can go ahead to use all the taus to create the setup
     */
-    pub fn multilinear_trusted_setup(tau_var: &[F]) -> Self {
+    pub fn multilinear_trusted_setup(tau_var: &[F]) -> Self  {
 
         println!("Tau len that comes in: {:?}", tau_var.len());
 
@@ -58,21 +61,21 @@ impl<F: PrimeField + Borrow<Fp<MontBackend<FrConfig, 4>, 4>>> KZG<F> {
         for (i, combinations) in bhc.iter().enumerate() {
             let mut res = F::one();
 
-            for (i, &bit) in combinations.iter().enumerate() {
+            for (j, &bit) in combinations.iter().enumerate() {
                 res *= if bit {
                     //true or false means 1 or 0
-                    tau_var[i]
+                    tau_var[j]
                 } else {
-                    F::one() - tau_var[i]
+                    F::one().sub(tau_var[j])
                 };
             }
 
             //encrypting all taus in G2
             if i < tau_var.len() {
-                g2_evals.push(g2.mul(tau_var[i]));
+                g2_evals.push(g2.mul_bigint(tau_var[i].into_bigint()));
             }
 
-            g1_evals.push(g1.mul(res));
+            g1_evals.push(g1.mul_bigint(res.into_bigint()));
         }
 
         KZG::new(g1_evals, g2_evals)
@@ -99,7 +102,7 @@ impl<F: PrimeField + Borrow<Fp<MontBackend<FrConfig, 4>, 4>>> KZG<F> {
         let mut res = G1::default();
         // zip them together
         for (tau, eval) in self.powers_of_tau.iter().zip(multilinear.iter()) {
-            res += tau.mul(*eval);
+            res += tau.mul_bigint(eval.into_bigint());
         }
         res
     }
@@ -143,12 +146,12 @@ impl<F: PrimeField + Borrow<Fp<MontBackend<FrConfig, 4>, 4>>> KZG<F> {
         let g1 = G1::generator();
         let g2 = G2::generator();
 
-        let ft_v = commitment + g1.mul(proof.v.neg()); // f(tau)  - v
+        let ft_v = commitment + g1.mul_bigint(proof.v.neg().into_bigint()); // f(tau)  - v
 
         let mut rhs = PairingOutput::default();
 
         for (i, a) in all_a.iter().enumerate() {
-            let tau_a = self.g2_tau[i] + g2.mul(a.neg()); // (tau - a)
+            let tau_a = self.g2_tau[i] + g2.mul_bigint(a.neg().into_bigint()); // (tau - a)
 
            let res = Bn254::pairing(proof.quotients[i], tau_a);
 

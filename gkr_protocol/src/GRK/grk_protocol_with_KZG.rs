@@ -12,11 +12,12 @@ use polynomials::sum::sum_poly::SumPoly;
 use polynomials::univariate::uni_poly::UnivariatePoly;
 use sha3::{Digest, Keccak256};
 use std::borrow::Borrow;
+use field_tracker::{end_tscope, start_tscope, Ft};
 use sumcheck_protocol::gkr_sumcheck::{prove as sub_prove, verify as sub_verify};
 use sumcheck_protocol::transcript::{to_bytes, HashTrait, Transcript};
 
 #[derive(Debug, Clone, PartialEq)]
-struct KZGProof<F: PrimeField> {
+pub struct KZGProof<F: PrimeField> {
     trusted_setup: KZG<F>,
     commitment: G1,
     proof: [MultiProof<F>; 2],
@@ -30,10 +31,11 @@ pub struct GKRProof<F: PrimeField> {
     kzg_proof: KZGProof<F>,
 }
 
-pub fn prove<F: PrimeField + Borrow<Fp<MontBackend<FrConfig, 4>, 4>>>(
+pub fn prove<F: PrimeField>(
     circuit: &mut Circuit<F>,
     inputs: &[F],
 ) -> GKRProof<F> {
+    start_tscope!("Prover");
     let mut transcript = Transcript::<Keccak256, F>::init(Keccak256::new());
     let inputs_poly = MultilinearPoly::new(inputs.to_vec());
     // prover evaluating the circuit
@@ -109,17 +111,19 @@ pub fn prove<F: PrimeField + Borrow<Fp<MontBackend<FrConfig, 4>, 4>>>(
         }
     }
 
-    // let kzg_proof = process_kzg(&inputs_poly, &mut current_rb, &mut current_rc);
+    let kzg_proof = process_kzg(&inputs_poly, &mut current_rb, &mut current_rc);
+
+    end_tscope!();
 
     GKRProof {
         output_poly,
         proof_polynomials: proof_polys,
         claimed_evaluations,
-        kzg_proof: process_kzg(&inputs_poly, &mut current_rb, &mut current_rc),
+        kzg_proof
     }
 }
 
-fn process_kzg<F: PrimeField + Borrow<Fp<MontBackend<FrConfig, 4>, 4>>>(
+pub fn process_kzg<F: PrimeField>(
     inputs_poly: &MultilinearPoly<F>,
     current_rb: &Vec<F>,
     current_rc: &Vec<F>,
@@ -149,38 +153,40 @@ fn process_kzg<F: PrimeField + Borrow<Fp<MontBackend<FrConfig, 4>, 4>>>(
     }
 }
 
-fn generate_open_at<F: PrimeField + Borrow<Fp<MontBackend<FrConfig, 4>, 4>>>(
-    var_size: usize,
-    commitment: &G1Projective,
-) -> (Vec<F>, Vec<F>) {
-    let mut transcript = Transcript::<Keccak256, F>::init(Keccak256::new());
-    let mut commitment_bytes = g1_to_bytes::<F>(&commitment);
+// fn generate_open_at<F: PrimeField>(
+//     var_size: usize,
+//     commitment: &G1Projective,
+// ) -> (Vec<F>, Vec<F>) {
+//     let mut transcript = Transcript::<Keccak256, F>::init(Keccak256::new());
+//     let mut commitment_bytes = g1_to_bytes::<F>(&commitment);
+//
+//     let mut open_at_rb = Vec::with_capacity(var_size);
+//     let mut open_at_rc = Vec::with_capacity(var_size);
+//
+//     for _ in 0..var_size {
+//         transcript.absorb(&commitment_bytes);
+//
+//         let open_rb = transcript.squeeze();
+//         open_at_rb.push(open_rb);
+//
+//         let open_rb_bytes = open_rb.into_bigint().to_bytes_be();
+//         transcript.absorb(&open_rb_bytes);
+//
+//         let open_rc = transcript.squeeze();
+//         open_at_rc.push(open_rc);
+//
+//         commitment_bytes = open_rc.into_bigint().to_bytes_be();
+//     }
+//     (open_at_rb, open_at_rc)
+// }
 
-    let mut open_at_rb = Vec::with_capacity(var_size);
-    let mut open_at_rc = Vec::with_capacity(var_size);
-
-    for _ in 0..var_size {
-        transcript.absorb(&commitment_bytes);
-
-        let open_rb = transcript.squeeze();
-        open_at_rb.push(open_rb);
-
-        let open_rb_bytes = open_rb.into_bigint().to_bytes_be();
-        transcript.absorb(&open_rb_bytes);
-
-        let open_rc = transcript.squeeze();
-        open_at_rc.push(open_rc);
-
-        commitment_bytes = open_rc.into_bigint().to_bytes_be();
-    }
-    (open_at_rb, open_at_rc)
-}
-
-pub fn verify<F: PrimeField + Borrow<Fp<MontBackend<FrConfig, 4>, 4>>>(
+pub fn verify<F: PrimeField>(
     proof: GKRProof<F>,
     mut circuit: Circuit<F>,
     inputs: &[F],
 ) -> bool {
+    start_tscope!("Verifier");
+
     let mut transcript = Transcript::<Keccak256, F>::init(Keccak256::new());
 
     let (mut current_claim, init_random_challenge) =
@@ -209,7 +215,7 @@ pub fn verify<F: PrimeField + Borrow<Fp<MontBackend<FrConfig, 4>, 4>>>(
 
         let (o_1, o_2) = if i == num_layers - 1 {
 
-            let (eval_rb, eval_rc, w_result) = verify_input(&proof, &current_random_challenge);
+            let (eval_rb, eval_rc, w_result) = verify_input(&proof.kzg_proof, &current_random_challenge);
 
             if !w_result {
                 return false;
@@ -258,33 +264,35 @@ pub fn verify<F: PrimeField + Borrow<Fp<MontBackend<FrConfig, 4>, 4>>>(
 
         current_claim = (alpha * o_1) + (beta * o_2);
     }
+    end_tscope!();
+
     true
 }
 
-fn verify_input<F: PrimeField + Borrow<Fp<MontBackend<FrConfig, 4>, 4>>>(
-    proof: &GKRProof<F>,
+pub fn verify_input<F: PrimeField>(
+    proof: &KZGProof<F>,
     current_random_challenge: &Vec<F>,
 ) -> (F, F, bool) {
     let (r_b, r_c) =
         current_random_challenge.split_at(current_random_challenge.len() / 2);
 
-    let kzg = &proof.kzg_proof;
+    // let proof = &proof;
 
-    let wb_verified = kzg.trusted_setup.verifier_verifies(
-        kzg.commitment,
+    let wb_verified = proof.trusted_setup.verifier_verifies(
+        proof.commitment,
         r_b,
-        &kzg.proof[0], //proof for r_b
+        &proof.proof[0], //proof for r_b
     );
 
-    let wc_verified = kzg.trusted_setup.verifier_verifies(
-        kzg.commitment,
+    let wc_verified = proof.trusted_setup.verifier_verifies(
+        proof.commitment,
         r_c,
-        &kzg.proof[1], //proof for r_c
+        &proof.proof[1], //proof for r_c
     );
 
     let w_result = wc_verified && wb_verified;
 
-    (kzg.proof[0].v, kzg.proof[1].v, w_result) // 'v' is the evaluation of the polynomial at 'a'
+    (proof.proof[0].v, proof.proof[1].v, w_result) // 'v' is the evaluation of the polynomial at 'a'
 }
 
 fn initiate_protocol<K: HashTrait, F: PrimeField>(
@@ -431,8 +439,16 @@ mod test {
     use super::*;
     use crate::gate::{Gate, Ops};
     use crate::layer::Layer;
-    use ark_bn254::{Fq, Fr};
+    // use ark_bn254::{Fq, Fr};
     use polynomials::multilinear::multilinear::{Multilinear, MultilinearPoly};
+
+    use field_tracker::{print_summary, Ft};
+    type Fr = Ft!(ark_bn254::Fr);
+
+
+
+
+
 
     fn get_circuit() -> Circuit<Fr> {
         let layer0 = Layer::new(vec![Gate::new(0, 0, 1, Ops::MUL)]);
@@ -471,27 +487,27 @@ mod test {
 
     #[test]
     fn it_add_polys_correctly() {
-        let poly_a = &[Fq::from(0), Fq::from(2)];
-        let poly_b = &[Fq::from(0), Fq::from(3)];
+        let poly_a = &[Fr::from(0), Fr::from(2)];
+        let poly_b = &[Fr::from(0), Fr::from(3)];
 
-        let expected_poly = vec![Fq::from(0), Fq::from(3), Fq::from(2), Fq::from(5)];
+        let expected_poly = vec![Fr::from(0), Fr::from(3), Fr::from(2), Fr::from(5)];
 
         let result = tensor_add_mul_polynomials(poly_a, poly_b, Ops::ADD);
 
         assert_eq!(result.polynomial, expected_poly);
 
-        let poly_a = &[Fq::from(0), Fq::from(3)];
-        let poly_b = &[Fq::from(0), Fq::from(0), Fq::from(0), Fq::from(2)];
+        let poly_a = &[Fr::from(0), Fr::from(3)];
+        let poly_b = &[Fr::from(0), Fr::from(0), Fr::from(0), Fr::from(2)];
 
         let expected_poly = vec![
-            Fq::from(0),
-            Fq::from(0),
-            Fq::from(0),
-            Fq::from(2),
-            Fq::from(3),
-            Fq::from(3),
-            Fq::from(3),
-            Fq::from(5),
+            Fr::from(0),
+            Fr::from(0),
+            Fr::from(0),
+            Fr::from(2),
+            Fr::from(3),
+            Fr::from(3),
+            Fr::from(3),
+            Fr::from(5),
         ];
 
         let result = tensor_add_mul_polynomials(poly_a, poly_b, Ops::ADD);
@@ -501,27 +517,27 @@ mod test {
 
     #[test]
     fn it_multiplies_polys_correctly() {
-        let poly_a = &[Fq::from(0), Fq::from(2)];
-        let poly_b = &[Fq::from(0), Fq::from(3)];
+        let poly_a = &[Fr::from(0), Fr::from(2)];
+        let poly_b = &[Fr::from(0), Fr::from(3)];
 
-        let expected_poly = vec![Fq::from(0), Fq::from(0), Fq::from(0), Fq::from(6)];
+        let expected_poly = vec![Fr::from(0), Fr::from(0), Fr::from(0), Fr::from(6)];
 
         let result = tensor_add_mul_polynomials(poly_a, poly_b, Ops::MUL);
 
         assert_eq!(result.polynomial, expected_poly);
 
-        let poly_a = &[Fq::from(0), Fq::from(3)];
-        let poly_b = &[Fq::from(0), Fq::from(0), Fq::from(0), Fq::from(2)];
+        let poly_a = &[Fr::from(0), Fr::from(3)];
+        let poly_b = &[Fr::from(0), Fr::from(0), Fr::from(0), Fr::from(2)];
 
         let expected_poly = vec![
-            Fq::from(0),
-            Fq::from(0),
-            Fq::from(0),
-            Fq::from(0),
-            Fq::from(0),
-            Fq::from(0),
-            Fq::from(0),
-            Fq::from(6),
+            Fr::from(0),
+            Fr::from(0),
+            Fr::from(0),
+            Fr::from(0),
+            Fr::from(0),
+            Fr::from(0),
+            Fr::from(0),
+            Fr::from(6),
         ];
 
         let result = tensor_add_mul_polynomials(poly_a, poly_b, Ops::MUL);
@@ -553,220 +569,7 @@ mod test {
         let verified = verify(proof, circuit, &input);
         println!("Verified: {:?}", verified);
         assert_eq!(verified, true);
+
+        print_summary!();
     }
 }
-
-//
-// Result:
-// Proof {
-//     output_poly: MultilinearPoly { polynomial: [938, 0] },
-//     proof_polynomials: [
-//             [
-//                 UnivariatePoly {
-//                     co_ex: [
-//                         Term {
-//                             coeff: 20392534301718573254799188749374153361497962288517655366201769616294618522877,
-//                             exp: 2
-//                         },
-//                         Term {
-//                             coeff: 8947344316974596338738173056591131585611030301357385521747675995960505101011,
-//                             exp: 1
-//                         },
-//                         Term {
-//                             coeff: 14436607124985380850955449684549265229987736210957027799446962760896493367346,
-//                             exp: 0
-//                         }
-//                     ],
-//                     degree: 2
-//                 },
-//                 UnivariatePoly {
-//                     co_ex: [
-//                         Term {
-//                             coeff: 1461072887676773288743009273722258704590639561704498351353735634529550878004,
-//                             exp: 2
-//                         },
-//                         Term {
-//                             coeff: 3276843783591504766002395661300236744983160465410853157072447701687629655875,
-//                             exp: 1
-//                         }
-//                     ],
-//                     degree: 2
-//                 }
-//             ],
-//             [
-//                 UnivariatePoly {
-//                     co_ex: [
-//                         Term {
-//                             coeff: 2043400694916232496964947044016014251764251031977583329975722958000552765319,
-//                             exp: 2
-//                         },
-//                         Term {
-//                             coeff: 1876406630826595457434032569802798103369024653330627786552931813380395603670,
-//                             exp: 1
-//                         },
-//                         Term {
-//                             coeff: 3843118017761700125602523371998987218074198524610508513461483381896194105296,
-//                             exp: 0
-//                         }
-//                     ],
-//                     degree: 2
-//                 },
-//                 UnivariatePoly {
-//                     co_ex: [
-//                         Term {
-//                             coeff: 7689292708758583972308341024881457419811579983794923106591784330894416955684,
-//                             exp: 2
-//                         },
-//                         Term {
-//                             coeff: 16464351538782785350087872053052637555008338534972270746317491146102397674638,
-//                             exp: 1
-//                         },
-//                         Term {
-//                             coeff: 19622841496137181122096598412580455202276810282064874834487132896154802360912,
-//                             exp: 0
-//                         }
-//                     ],
-//                     degree: 2
-//                 },
-//                 UnivariatePoly {
-//                     co_ex: [
-//                         Term {
-//                             coeff: 16076088174335052486351801648527176630500511051597480277906516082242139274967,
-//                             exp: 2
-//                         },
-//                         Term {
-//                             coeff: 5894136088811413150898981759105924560959820288910346806531750336929184945754,
-//                             exp: 1
-//                         }, Term {
-//                             coeff: 12137895154004255554217839067815732081229171961415461537205652274910774782302,
-//                             exp: 0
-//                         }
-//                     ],
-//                     degree: 2
-//                 },
-//                 UnivariatePoly {
-//                     co_ex: [
-//                         Term {
-//                             coeff: 17592265101642936948885160085544707605919397641519999346412218119444661417009,
-//                             exp: 2
-//                         },
-//                         Term {
-//                             coeff: 7320476945994771682520138252415976288113293645805385300690144583966467812865,
-//                             exp: 1
-//                         }
-//                 ],
-//                     degree: 2
-//                 }
-//             ],
-//             [
-//                 UnivariatePoly {
-//                     co_ex: [
-//                         Term {
-//                             coeff: 9639892603938869200377086662386398276914092682999523012722086177818455617894,
-//                             exp: 2
-//                         },
-//                         Term {
-//                             coeff: 9706472777980028830786369660455593012997401756176853069273619512962874692123,
-//                             exp: 1
-//                         },
-//                         Term {
-//                             coeff: 14291356754607100488534692747969725627635046817979146094285991831301626627024,
-//                             exp: 0
-//                         }
-//                 ],
-//                     degree: 2
-//                 },
-//                 UnivariatePoly {
-//                     co_ex: [
-//                         Term {
-//                             coeff: 19487237680903209671604550204755741656695491357371943510662488221165505990612,
-//                             exp: 2
-//                         },
-//                         Term {
-//                             coeff: 1245176504961613538606362309446144235358418292426865369269047732420002985627,
-//                             exp: 1
-//                         },
-//                         Term {
-//                             coeff: 127134263800813178029173910425856436750904648380903505928986323898520254922,
-//                             exp: 0
-//                         }
-//                     ],
-//                     degree: 2
-//                 },
-//                 UnivariatePoly {
-//                     co_ex: [
-//                         Term {
-//                             coeff: 3891098896681817509083674698748483325159821852359067549912320264372127987483,
-//                             exp: 2
-//                         },
-//                         Term {
-//                             coeff: 5159159294039131490385690020763595352186316628193478864334659280046262229215,
-//                             exp: 1
-//                         },
-//                         Term {
-//                             coeff: 12837984681118326222777041025745196411202225919863487929451224642157418278919,
-//                             exp: 0
-//                         }
-//                     ],
-//                     degree: 2
-//                 },
-//                 UnivariatePoly {
-//                     co_ex: [
-//                         Term {
-//                             coeff: 18316322801961913016638649301578729861863702496648830028599769370326300267362,
-//                             exp: 2
-//                                 },
-//                         Term {
-//                             coeff: 14902819671246711744918850280174503355412726370028823473255051088951360183117,
-//                             exp: 1
-//                         },
-//                         Term {
-//                             coeff: 12536700215478092449023874704115379047081205030317135953065762089442893173374,
-//                             exp: 0
-//                         }
-//                     ],
-//                     degree: 2
-//                 },
-//                 UnivariatePoly {
-//                     co_ex: [
-//                         Term {
-//                             coeff: 7772834860586316383678666781926897102605532903988555595274149814442468499725,
-//                             exp: 2
-//                         },
-//                         Term {
-//                             coeff: 9461764726342563481760949523777745174687546734334619101909616895941235680930,
-//                             exp: 1
-//                         },
-//                         Term {
-//                             coeff: 9261699687236042274020436703855241327219982429001872599419618826562604205758,
-//                             exp: 0
-//                         }
-//                     ],
-//                     degree: 2
-//                 },
-//                 UnivariatePoly {
-//                     co_ex: [
-//                         Term {
-//                             coeff: 17516436125990841383154427083316031694636335331360661136403881641159703664776,
-//                             exp: 2
-//                         },
-//                         Term {
-//                             coeff: 21055983605892951046040730063717924341558819347677912043660251655832305336455,
-//                             exp: 1
-//                         }
-//                     ],
-//                     degree: 2
-//                 }
-//             ]
-//     ],
-//     claimed_evaluations: [
-//             (
-//                 11504556113205068759693096395331238647544466924762229463476554927926964231098,
-//                 13572130628097107895403491860733558278657290070433209341519472726473976664294
-//             ),
-//             (
-//                 3603627254425994773455777801039310305249226891499986366557899534100095665650,
-//                 421595593338255816901013955036972356653324994289757854301492762720824026280
-//             )
-//     ]
-// }

@@ -2,15 +2,16 @@ use crate::circuit::Circuit;
 use crate::gate::Ops;
 use crate::GRK::gkr_prover::GKRProof;
 use ark_ff::{BigInteger, PrimeField};
+use field_tracker::{end_tscope, start_tscope};
 use polynomials::multilinear::multilinear::{Multilinear, MultilinearPoly};
 use sha3::{Digest, Keccak256};
 use sumcheck_protocol::gkr_sumcheck::verify as sub_verify;
 use sumcheck_protocol::transcript::{to_bytes, HashTrait, Transcript};
-
-
+use crate::GRK::grk_protocol_with_KZG::verify_input;
 
 // GRK PROTOCOL VERIFIER
-pub fn verify<F: PrimeField>(proof: GKRProof<F>, mut circuit: Circuit<F>, inputs: &[F]) -> bool {
+pub fn verify<F: PrimeField>(proof: GKRProof<F>, mut circuit: Circuit<F>) -> bool {
+    start_tscope!("Verifier"); //start of benchmarking
     let mut transcript = Transcript::<Keccak256, F>::init(Keccak256::new());
     let mut state = VerifierState::new();
 
@@ -39,7 +40,6 @@ pub fn verify<F: PrimeField>(proof: GKRProof<F>, mut circuit: Circuit<F>, inputs
          verifier_result = state.update(
             &proof,
             &mut circuit,
-            inputs,
             i,
             &sum_check_verify.random_challenges,
             init_challenge,
@@ -51,6 +51,8 @@ pub fn verify<F: PrimeField>(proof: GKRProof<F>, mut circuit: Circuit<F>, inputs
             return false;
         }
     }
+    end_tscope!(); //end of benchmarking
+
     verifier_result
 }
 
@@ -77,7 +79,6 @@ impl<F: PrimeField> VerifierState<F> {
         &mut self,
         proof: &GKRProof<F>,
         circuit: &mut Circuit<F>,
-        inputs: &[F],
         i: usize,
         current_challenges: &[F],
         init_challenge: F,
@@ -85,7 +86,14 @@ impl<F: PrimeField> VerifierState<F> {
         transcript: &mut Transcript<Keccak256, F>,
     ) -> bool {
         let (o_1, o_2) = if i == circuit.layers.len() - 1 {
-            evaluate_input(inputs, current_challenges)
+            let (eval_rb, eval_rc, w_result) = verify_input(&proof.kzg_proof, &current_challenges.to_vec());
+
+            if !w_result {
+                return false;
+            }
+
+            (eval_rb, eval_rc)  // 'v' is the evaluation of the polynomial at 'a'
+
         } else {
             proof.claimed_evaluations[i]
         };
@@ -213,17 +221,6 @@ mod test {
 
         Circuit::new(circuit)
     }
-
-    // fn get_big_inputs() -> Vec<Fq> {
-    //     let size = 1 << 3; // 1,048,576 elements
-    //     let mut rng = test_rng();
-    //
-    //     let poly: Vec<Fq> = (0..size)
-    //         .map(|_| Fq::from(rng.gen_range(1..20)))
-    //         .collect();
-    //
-    //     poly
-    // }
 
     fn get_big_inputs(size: usize) -> Vec<Fq> {
         let size = 1 << size;
@@ -412,7 +409,7 @@ mod test {
             Fq::from(8),
         ];
 
-        let verified = verify(proof, circuit, &input);
+        let verified = verify(proof, circuit);
         println!("Verified: {:?}", verified);
         assert_eq!(verified, true);
 
@@ -423,14 +420,23 @@ mod test {
     fn test_gkr_protocol_large_input() {
 
         let size = 5;
-        let mut circuit = get_big_circuit(size);
-        let input = get_big_inputs(size);
+        let mut circuit = get_circuit();
+        let input =  [
+            Fq::from(1),
+            Fq::from(2),
+            Fq::from(3),
+            Fq::from(4),
+            Fq::from(5),
+            Fq::from(6),
+            Fq::from(7),
+            Fq::from(8),
+        ];
 
-        let proof = prove(&mut circuit, &input.clone());
+        let proof = prove(&mut circuit, &input);
 
         println!("Result: {:?}", proof);
 
-        let verified = verify(proof, circuit, &input);
+        let verified = verify(proof, circuit);
         println!("Verified: {:?}", verified);
         assert_eq!(verified, true);
 

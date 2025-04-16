@@ -1,6 +1,7 @@
 use crate::circuit::Circuit;
 use crate::gate::Ops;
 use ark_ff::{BigInteger, PrimeField};
+use field_tracker::{end_tscope, start_tscope};
 use polynomials::multilinear::multilinear::{Multilinear, MultilinearPoly};
 use polynomials::product::product_poly::ProductPoly;
 use polynomials::sum::sum_poly::SumPoly;
@@ -20,6 +21,7 @@ pub struct GKRProof<F: PrimeField> {
 }
 
 pub fn prove <F: PrimeField> (circuit: &mut Circuit<F>, inputs: &[F]) -> GKRProof<F> {
+    start_tscope!("Prover");
     let mut transcript = Transcript::<Keccak256, F>::init(Keccak256::new());
     let inputs_poly = MultilinearPoly::new(inputs.to_vec());
     // prover evaluating the circit
@@ -83,6 +85,7 @@ pub fn prove <F: PrimeField> (circuit: &mut Circuit<F>, inputs: &[F]) -> GKRProo
             claimed_evaluations.push((o_1, o_2));
         }
     }
+    end_tscope!();
 
     GKRProof {
         output_poly,
@@ -92,6 +95,8 @@ pub fn prove <F: PrimeField> (circuit: &mut Circuit<F>, inputs: &[F]) -> GKRProo
 }
 
 pub fn verify <F: PrimeField> (proof: GKRProof<F>, mut circuit: Circuit<F>, inputs: &[F]) -> bool {
+    start_tscope!("Verifier");
+
     let mut transcript = Transcript::<Keccak256, F>::init(Keccak256::new());
 
     let (mut current_claim, init_random_challenge) =
@@ -119,6 +124,7 @@ pub fn verify <F: PrimeField> (proof: GKRProof<F>, mut circuit: Circuit<F>, inpu
         let current_random_challenge = sum_check_verify.random_challenges;
 
         let (o_1, o_2) = if i == num_layers - 1 {
+            //Input level
             evaluate_input_poly(inputs, &current_random_challenge)
         } else {
             proof.claimed_evaluations[i]
@@ -160,6 +166,8 @@ pub fn verify <F: PrimeField> (proof: GKRProof<F>, mut circuit: Circuit<F>, inpu
 
         current_claim = (alpha * o_1) + (beta * o_2);
     }
+
+    end_tscope!();
 
     true
 }
@@ -299,12 +307,15 @@ fn evaluate_input_poly <F: PrimeField> (inputs: &[F], sumcheck_random_challenges
 mod test {
     use super::*;
     use crate::gate::{Gate, Ops};
-    use ark_bn254::{Config, Fq, Fr, FrConfig};
-    use ark_ff::{Fp256, MontBackend};
-    use polynomials::multilinear::multilinear::{Multilinear, MultilinearPoly};
-    use polynomials::product::product_poly::ProductPoly;
-    use polynomials::sum::sum_poly::SumPoly;
     use crate::layer::Layer;
+    // use ark_bn254::{Fq, Fr};
+    use polynomials::multilinear::multilinear::{Multilinear, MultilinearPoly};
+
+
+
+    use field_tracker::{print_summary, Ft};
+
+    type Fr = Ft!(ark_bn254::Fr);
 
     fn get_circuit() -> Circuit<Fr> {
         let layer0 = Layer::new(vec![Gate::new(0, 0, 1, Ops::MUL)]);
@@ -341,27 +352,27 @@ mod test {
 
     #[test]
     fn it_add_polys_correctly() {
-        let poly_a = &[Fq::from(0), Fq::from(2)];
-        let poly_b = &[Fq::from(0), Fq::from(3)];
+        let poly_a = &[Fr::from(0), Fr::from(2)];
+        let poly_b = &[Fr::from(0), Fr::from(3)];
 
-        let expected_poly = vec![Fq::from(0), Fq::from(3), Fq::from(2), Fq::from(5)];
+        let expected_poly = vec![Fr::from(0), Fr::from(3), Fr::from(2), Fr::from(5)];
 
         let result = tensor_add_mul_polynomials(poly_a, poly_b, Ops::ADD);
 
         assert_eq!(result.polynomial, expected_poly);
 
-        let poly_a = &[Fq::from(0), Fq::from(3)];
-        let poly_b = &[Fq::from(0), Fq::from(0), Fq::from(0), Fq::from(2)];
+        let poly_a = &[Fr::from(0), Fr::from(3)];
+        let poly_b = &[Fr::from(0), Fr::from(0), Fr::from(0), Fr::from(2)];
 
         let expected_poly = vec![
-            Fq::from(0),
-            Fq::from(0),
-            Fq::from(0),
-            Fq::from(2),
-            Fq::from(3),
-            Fq::from(3),
-            Fq::from(3),
-            Fq::from(5),
+            Fr::from(0),
+            Fr::from(0),
+            Fr::from(0),
+            Fr::from(2),
+            Fr::from(3),
+            Fr::from(3),
+            Fr::from(3),
+            Fr::from(5),
         ];
 
         let result = tensor_add_mul_polynomials(poly_a, poly_b, Ops::ADD);
@@ -371,27 +382,27 @@ mod test {
 
     #[test]
     fn it_multiplies_polys_correctly() {
-        let poly_a = &[Fq::from(0), Fq::from(2)];
-        let poly_b = &[Fq::from(0), Fq::from(3)];
+        let poly_a = &[Fr::from(0), Fr::from(2)];
+        let poly_b = &[Fr::from(0), Fr::from(3)];
 
-        let expected_poly = vec![Fq::from(0), Fq::from(0), Fq::from(0), Fq::from(6)];
+        let expected_poly = vec![Fr::from(0), Fr::from(0), Fr::from(0), Fr::from(6)];
 
         let result = tensor_add_mul_polynomials(poly_a, poly_b, Ops::MUL);
 
         assert_eq!(result.polynomial, expected_poly);
 
-        let poly_a = &[Fq::from(0), Fq::from(3)];
-        let poly_b = &[Fq::from(0), Fq::from(0), Fq::from(0), Fq::from(2)];
+        let poly_a = &[Fr::from(0), Fr::from(3)];
+        let poly_b = &[Fr::from(0), Fr::from(0), Fr::from(0), Fr::from(2)];
 
         let expected_poly = vec![
-            Fq::from(0),
-            Fq::from(0),
-            Fq::from(0),
-            Fq::from(0),
-            Fq::from(0),
-            Fq::from(0),
-            Fq::from(0),
-            Fq::from(6),
+            Fr::from(0),
+            Fr::from(0),
+            Fr::from(0),
+            Fr::from(0),
+            Fr::from(0),
+            Fr::from(0),
+            Fr::from(0),
+            Fr::from(6),
         ];
 
         let result = tensor_add_mul_polynomials(poly_a, poly_b, Ops::MUL);
@@ -421,6 +432,8 @@ mod test {
         let verified = verify(proof, circuit, &input);
         println!("Verified: {:?}", verified);
         assert_eq!(verified, true);
+
+        print_summary!();
     }
 }
 
